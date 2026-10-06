@@ -123,6 +123,84 @@ public sealed class SessionLifetimeTests
     }
 
     [Fact]
+    public async Task DriveCreationRemovalAndFailuresStayOrderedInTheirOwningSession()
+    {
+        await using var session = new PowerShellSession();
+        await using var foreignSession = new PowerShellSession();
+        using var creationGate = new GetterGate();
+        using var removalGate = new GetterGate();
+        var name = "RunspaceQueue" + Guid.NewGuid().ToString("N");
+        var root = Path.Combine(Path.GetTempPath(), name);
+        var file = Path.Combine(root, "retained.txt");
+        var driveNode = BuiltInCatalog.LocalSystem.Single(node => node.Kind == ResourceKind.Drives);
+        var parameters = new Dictionary<string, string> { ["Name"] = name, ["Provider"] = "FileSystem", ["Root"] = root };
+        try
+        {
+            Directory.CreateDirectory(root);
+            await File.WriteAllTextAsync(file, "underlying-data");
+            var drives = await session.QueryAsync(driveNode);
+            Assert.Equal(InvocationOutcome.Completed, drives.Outcome);
+            var objects = await session.InvokeForTestingAsync("param($object) $object", arguments: [new InspectionProbe(creationGate)]);
+            var inspection = session.InspectAsync(objects.Id, Assert.Single(objects.Rows).Handle);
+            try
+            {
+                await creationGate.Entered.Task.WaitAsync(Timeout);
+                var add = session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [], parameters);
+                var duplicate = session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [], parameters);
+                var query = session.QueryAsync(driveNode);
+                Assert.False(add.IsCompleted);
+                Assert.False(duplicate.IsCompleted);
+                Assert.False(query.IsCompleted);
+                Assert.DoesNotContain(await foreignSession.GetDriveNodesAsync().WaitAsync(Timeout), node => node.Path == $"{name}:\\");
+                creationGate.Release.Set();
+                await inspection.WaitAsync(Timeout);
+                Assert.Equal(InvocationOutcome.Completed, (await add.WaitAsync(Timeout)).Outcome);
+                var failedAdd = await duplicate.WaitAsync(Timeout);
+                Assert.Equal(InvocationOutcome.Failed, failedAdd.Outcome);
+                Assert.Contains(failedAdd.Diagnostics, record => record.Stream == "Error" && record.Message.Contains(name));
+                drives = await query.WaitAsync(Timeout);
+                Assert.Equal(InvocationOutcome.Completed, drives.Outcome);
+                Assert.Equal(root, Assert.Single(drives.Rows, row => row.Cells["Name"].Display == name).Cells["Root"].Value);
+            }
+            finally { creationGate.Release.Set(); await inspection.WaitAsync(Timeout); }
+
+            var selected = Assert.Single(drives.Rows, row => row.Cells["Name"].Display == name);
+            var removalObjects = await session.InvokeForTestingAsync("param($object) $object", arguments: [new InspectionProbe(removalGate)]);
+            var removalInspection = session.InspectAsync(removalObjects.Id, Assert.Single(removalObjects.Rows).Handle);
+            try
+            {
+                await removalGate.Entered.Task.WaitAsync(Timeout);
+                var before = session.GetDriveNodesAsync();
+                var remove = session.ExecuteAsync(ConsoleActionId.RemoveDrive, drives.Id, [selected.Handle], new Dictionary<string, string>());
+                var missing = session.ExecuteAsync(ConsoleActionId.RemoveDrive, drives.Id, [selected.Handle], new Dictionary<string, string>());
+                var after = session.GetDriveNodesAsync();
+                Assert.False(before.IsCompleted);
+                Assert.False(remove.IsCompleted);
+                Assert.False(missing.IsCompleted);
+                Assert.False(after.IsCompleted);
+                removalGate.Release.Set();
+                await removalInspection.WaitAsync(Timeout);
+                Assert.Contains(await before.WaitAsync(Timeout), node => node.Path == $"{name}:\\");
+                Assert.Equal(InvocationOutcome.Completed, (await remove.WaitAsync(Timeout)).Outcome);
+                var failedRemove = await missing.WaitAsync(Timeout);
+                Assert.Equal(InvocationOutcome.Failed, failedRemove.Outcome);
+                Assert.Contains(failedRemove.Diagnostics, record => record.Stream == "Error" && record.Message.Contains(name));
+                Assert.DoesNotContain(await after.WaitAsync(Timeout), node => node.Path == $"{name}:\\");
+                Assert.DoesNotContain(await foreignSession.GetDriveNodesAsync(), node => node.Path == $"{name}:\\");
+                Assert.Equal("underlying-data", await File.ReadAllTextAsync(file));
+            }
+            finally { removalGate.Release.Set(); await removalInspection.WaitAsync(Timeout); }
+        }
+        finally
+        {
+            creationGate.Release.Set();
+            removalGate.Release.Set();
+            await session.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public async Task ShutdownCancelsQueuedWorkButWaitsForNoncooperativeInspectionBeforeDisposingObjects()
     {
         await using var session = new PowerShellSession();

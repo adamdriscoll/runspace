@@ -6,6 +6,7 @@ using Avalonia.LogicalTree;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Runspace.Core;
 using Runspace.Desktop;
 using Runspace.Desktop.ViewModels;
@@ -273,6 +274,239 @@ public sealed class ConsoleTests
     }
 
     [AvaloniaFact]
+    public async Task ProviderContainersLoadOnlyOnExpansionAndReleaseTemporaryResults()
+    {
+        var root = new ConsoleNode("literal-drive", "Literal:", ResourceKind.ProviderPath, "Session drive", "Literal:\\", ProviderName: "FileSystem");
+        var child = new ConsoleNode("literal-child", "quoted'[one]*?", ResourceKind.ProviderPath, "Literal container",
+            "Literal:\\quoted'[one]*?", ProviderName: "FileSystem");
+        var pending = new TaskCompletionSource<ConsoleResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var result = ProviderResult(
+            new(Guid.NewGuid(), new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From(child.Name) }, child),
+            new(Guid.NewGuid(), new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From("leaf.txt") }));
+        var empty = ProviderResult();
+        var session = new FixtureSession
+        {
+            DriveNodes = [root],
+            Query = node => node == root ? pending.Task : Task.FromResult(node == child ? empty : ProviderResult())
+        };
+        var window = new MainWindow(session);
+        window.Show();
+        try
+        {
+            await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
+            window.UpdateLayout();
+            var drive = Assert.Single(((ConsoleViewModel)window.DataContext!).Roots[2].Children);
+            Assert.True(drive.IsLazy);
+            Assert.Equal("Expand to load...", Assert.Single(drive.Children).Name);
+            Assert.DoesNotContain(session.QueryNodes, node => node.Kind == ResourceKind.ProviderPath);
+            var container = window.FindControl<TreeView>("NavigationTree")!.GetVisualDescendants().OfType<TreeViewItem>()
+                .Single(item => ReferenceEquals(item.DataContext, drive));
+            container.IsExpanded = true;
+            await UntilAsync(() => drive.IsLoading);
+            container.RaiseEvent(new RoutedEventArgs(TreeViewItem.ExpandedEvent));
+            Assert.Single(session.QueryNodes, node => node == root);
+            Assert.DoesNotContain(session.QueryNodes, node => node == child);
+            pending.SetResult(result);
+            await UntilAsync(() => !drive.IsLoading);
+            Assert.False(drive.IsLazy);
+            var nested = Assert.Single(drive.Children);
+            Assert.Equal(child, nested.Node);
+            Assert.True(nested.IsLazy);
+            Assert.Contains(result.Id, session.Released);
+            container.IsExpanded = false;
+            container.IsExpanded = true;
+            Assert.Single(session.QueryNodes, node => node == root);
+            window.UpdateLayout();
+            var childContainer = window.FindControl<TreeView>("NavigationTree")!.GetVisualDescendants().OfType<TreeViewItem>()
+                .Single(item => ReferenceEquals(item.DataContext, nested));
+            childContainer.IsExpanded = true;
+            await UntilAsync(() => !nested.IsLazy);
+            Assert.Single(session.QueryNodes, node => node == child);
+            Assert.Empty(nested.Children);
+            Assert.Contains(empty.Id, session.Released);
+        }
+        finally { pending.TrySetResult(result); window.Close(); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData("Environment", "Env:\\")]
+    [InlineData("Alias", "Alias:\\")]
+    [InlineData("Variable", "Variable:\\")]
+    [InlineData("Function", "Function:\\")]
+    public async Task FlatProvidersShowItemsWithoutInventingContainerOrMutationActions(string provider, string path)
+    {
+        var node = new ConsoleNode("flat-provider", provider, ResourceKind.ProviderPath, "Flat provider", path, ProviderName: provider);
+        var session = new FixtureSession
+        {
+            DriveNodes = [node],
+            Query = _ => Task.FromResult(ProviderResult(
+                new ConsoleRow(Guid.NewGuid(), new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From("leaf") })))
+        };
+        var window = new MainWindow(session);
+        window.Show();
+        try
+        {
+            await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
+            window.UpdateLayout();
+            var tree = window.FindControl<TreeView>("NavigationTree")!;
+            var drive = Assert.Single(((ConsoleViewModel)window.DataContext!).Roots[2].Children);
+            var container = tree.GetVisualDescendants().OfType<TreeViewItem>()
+                .Single(item => ReferenceEquals(item.DataContext, drive));
+            container.IsExpanded = true;
+            await UntilAsync(() => !drive.IsLazy);
+            Assert.Empty(drive.Children);
+            tree.SelectedItem = drive;
+            await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
+            var grid = window.FindControl<DataGrid>("ResultsGrid")!;
+            grid.SelectedItem = Assert.Single(grid.ItemsSource!.Cast<ConsoleRow>());
+            var actions = window.FindControl<StackPanel>("ActionsPanel")!.Children.OfType<Button>().ToArray();
+            Assert.True(actions.Single(button => Equals(button.Tag, ConsoleActionId.Properties)).IsEnabled);
+            Assert.DoesNotContain(actions, button => button.Tag is ConsoleActionId.Browse or ConsoleActionId.SetValue
+                or ConsoleActionId.RemoveItem or ConsoleActionId.AddDrive or ConsoleActionId.RemoveDrive);
+            Assert.False(window.FindControl<Border>("ResultMessage")!.IsVisible);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(InvocationOutcome.Failed, false)]
+    [InlineData(InvocationOutcome.CompletedWithErrors, false)]
+    [InlineData(InvocationOutcome.CompletedWithErrors, true)]
+    public async Task FailedOrPartialProviderExpansionIsVisibleAndCanBeRetried(InvocationOutcome outcome, bool hasChildren)
+    {
+        var root = new ConsoleNode("provider-root", "Provider:", ResourceKind.ProviderPath, "Provider navigation", "Provider:\\");
+        var child = new ConsoleNode("usable-child", "Usable child", ResourceKind.ProviderPath, "Usable container", "Provider:\\child");
+        var complete = ProviderResult(new ConsoleRow(Guid.NewGuid(),
+            new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From(child.Name) }, child));
+        var incomplete = (hasChildren ? complete with { Id = Guid.NewGuid() } : ProviderResult()) with
+        {
+            Outcome = outcome,
+            Diagnostics = [new(DateTimeOffset.Now, "Error", "fixture-container-navigation-unsupported")]
+        };
+        var attempts = 0;
+        var session = new FixtureSession
+        {
+            DriveNodes = [root],
+            Query = node => Task.FromResult(node == root ? ++attempts == 1 ? incomplete : complete : ProviderResult())
+        };
+        var window = new MainWindow(session);
+        window.Show();
+        try
+        {
+            await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
+            window.UpdateLayout();
+            var model = (ConsoleViewModel)window.DataContext!;
+            var drive = Assert.Single(model.Roots[2].Children);
+            var previousMessage = window.FindControl<TextBlock>("ResultMessageText")!.Text;
+            var previousStatus = model.Status;
+            var container = window.FindControl<TreeView>("NavigationTree")!.GetVisualDescendants().OfType<TreeViewItem>()
+                .Single(item => ReferenceEquals(item.DataContext, drive));
+            container.IsExpanded = true;
+            await UntilAsync(() => attempts == 1 && !drive.IsLoading);
+            Assert.True(drive.IsLazy);
+            Assert.Contains("fixture-container-navigation-unsupported", model.Diagnostics);
+            Assert.True(window.FindControl<Border>("DiagnosticsPane")!.IsVisible);
+            Assert.True(window.FindControl<Border>("ResultMessage")!.IsVisible);
+            if (outcome == InvocationOutcome.CompletedWithErrors)
+            {
+                if (hasChildren) Assert.Equal(child, Assert.Single(drive.Children).Node);
+                else Assert.Equal("Expand to retry...", Assert.Single(drive.Children).Name);
+                Assert.Contains("incomplete", window.FindControl<TextBlock>("ResultMessageText")!.Text);
+            }
+            else Assert.Equal("Expand to load...", Assert.Single(drive.Children).Name);
+            Assert.Contains(incomplete.Id, session.Released);
+            container.IsExpanded = false;
+            container.IsExpanded = true;
+            await UntilAsync(() => attempts == 2 && !drive.IsLoading);
+            Assert.False(drive.IsLazy);
+            Assert.Equal(child, Assert.Single(drive.Children).Node);
+            Assert.Contains(complete.Id, session.Released);
+            if (outcome == InvocationOutcome.CompletedWithErrors)
+            {
+                Assert.Equal(previousMessage, window.FindControl<TextBlock>("ResultMessageText")!.Text);
+                Assert.Equal(previousStatus, model.Status);
+            }
+        }
+        finally { window.Close(); }
+    }
+
+    private static ConsoleResult ProviderResult(params ConsoleRow[] rows) =>
+        new(Guid.NewGuid(), [new("Name", "Name")], rows, "Get-ChildItem -LiteralPath '<fixture>'", [],
+            TimeSpan.Zero, InvocationOutcome.Completed);
+
+    [AvaloniaTheory]
+    [InlineData(ConsoleActionId.AddDrive, InvocationOutcome.Completed)]
+    [InlineData(ConsoleActionId.AddDrive, InvocationOutcome.Failed)]
+    [InlineData(ConsoleActionId.RemoveDrive, InvocationOutcome.Completed)]
+    [InlineData(ConsoleActionId.RemoveDrive, InvocationOutcome.Failed)]
+    public async Task DriveActionsRefreshNavigationWithoutRestartAndKeepFailedOutcomes(ConsoleActionId actionId, InvocationOutcome outcome)
+    {
+        var name = "Fixture" + Guid.NewGuid().ToString("N");
+        var drive = new ConsoleNode("fixture-drive", name, ResourceKind.ProviderPath, "Fixture drive", $"{name}:\\", ProviderName: "FileSystem");
+        List<ConsoleNode> drives = actionId == ConsoleActionId.RemoveDrive ? [drive] : [];
+        var session = new FixtureSession
+        {
+            DriveNodes = drives,
+            ExecutionOutcome = outcome,
+            Executing = _ =>
+            {
+                if (outcome != InvocationOutcome.Completed) return;
+                if (actionId == ConsoleActionId.AddDrive) drives.Add(drive);
+                else drives.Clear();
+            },
+            Query = node => Task.FromResult(node.Kind == ResourceKind.Drives
+                ? ProviderResult(drives.Select(driveNode => new ConsoleRow(Guid.NewGuid(),
+                    new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From(driveNode.Name) }, driveNode)).ToArray())
+                : ProviderResult())
+        };
+        var window = new MainWindow(session);
+        window.Show();
+        try
+        {
+            var model = (ConsoleViewModel)window.DataContext!;
+            await UntilAsync(() => !model.IsBusy);
+            window.FindControl<TreeView>("NavigationTree")!.SelectedItem =
+                model.Roots[0].Children.Single(item => item.Node.Kind == ResourceKind.Drives);
+            await UntilAsync(() => !model.IsBusy);
+            var grid = window.FindControl<DataGrid>("ResultsGrid")!;
+            if (actionId == ConsoleActionId.RemoveDrive) grid.SelectedItem = Assert.Single(grid.ItemsSource!.Cast<ConsoleRow>());
+            var action = BuiltInCatalog.GetActions(BuiltInCatalog.LocalSystem.Single(node => node.Kind == ResourceKind.Drives),
+                grid.SelectedItems.Cast<ConsoleRow>().ToArray()).Single(action => action.Id == actionId);
+            var operation = window.InvokeActionAsync(action);
+            await UntilAsync(() => window.OwnedWindows.Any());
+            var dialog = window.OwnedWindows.Single();
+            if (actionId == ConsoleActionId.AddDrive)
+            {
+                var inputs = dialog.GetLogicalDescendants().OfType<TextBox>().ToArray();
+                inputs[0].Text = name;
+                inputs[1].Text = "fixture-root'[one]*?;$(not-code)";
+            }
+            Click(dialog.GetLogicalDescendants().OfType<Button>().Single(button => Equals(button.Content, "OK")));
+            await operation;
+            Assert.Equal(2, session.DriveReads);
+            Assert.Equal(drives, model.Roots[2].Children.Select(item => item.Node));
+            Assert.Equal(drives.Select(node => node.Name), grid.ItemsSource!.Cast<ConsoleRow>().Select(row => row.Cells["Name"].Display));
+            Assert.Contains(outcome.ToString(), model.Status);
+            Assert.Equal(2, session.QueryNodes.Count(node => node.Kind == ResourceKind.Drives));
+            if (outcome == InvocationOutcome.Failed)
+            {
+                Assert.True(window.FindControl<Border>("ResultMessage")!.IsVisible);
+                Assert.Contains("Failed", window.FindControl<TextBlock>("ResultMessageText")!.Text);
+                Assert.Contains("partial-fixture-failure", model.Diagnostics);
+            }
+            if (actionId == ConsoleActionId.AddDrive)
+            {
+                Assert.Empty(session.LastSelection!);
+                Assert.Equal(name, session.LastParameters!["Name"]);
+                Assert.Equal("FileSystem", session.LastParameters["Provider"]);
+                Assert.Equal("fixture-root'[one]*?;$(not-code)", session.LastParameters["Root"]);
+            }
+            else Assert.Single(session.LastSelection!);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
     public async Task FilteringClearsHiddenSelectionAndUpdatesActions()
     {
         var window = new MainWindow(new FixtureSession());
@@ -318,12 +552,22 @@ public sealed class ConsoleTests
         public InvocationOutcome ExecutionOutcome { get; init; } = InvocationOutcome.Completed;
         public InvocationOutcome? LastOutcome { get; private set; }
         public IReadOnlyList<Guid>? LastSelection { get; private set; }
+        public IReadOnlyDictionary<string, string>? LastParameters { get; private set; }
+        public Action<ConsoleActionId>? Executing { get; init; }
         public int Queries { get; private set; }
+        public int DriveReads { get; private set; }
+        public List<ConsoleNode> QueryNodes { get; } = [];
+        public List<Guid> Released { get; } = [];
+        public Func<ConsoleNode, Task<ConsoleResult>>? Query { get; init; }
+        public IReadOnlyList<ConsoleNode> DriveNodes { get; init; } =
+            [new("env", "Env:", ResourceKind.ProviderPath, "Environment", "Env:")];
         public bool Disposed { get; private set; }
         public string RuntimeVersion => "fixture";
         public Task<ConsoleResult> QueryAsync(ConsoleNode node, CancellationToken cancellationToken = default)
         {
             Queries++;
+            QueryNodes.Add(node);
+            if (Query is not null) return Query(node);
             ConsoleColumn[] columns = [new("Name", "Name"), new("Id", "Id", ColumnKind.Number)];
             ConsoleRow[] rows = [Row("alpha", 100), Row("beta", 2)];
             return Task.FromResult(new ConsoleResult(Guid.NewGuid(), columns, SuppressQueryOutput ? [] : rows, "Get-Process", [],
@@ -337,6 +581,8 @@ public sealed class ConsoleTests
             IReadOnlyDictionary<string, string> parameters, CancellationToken cancellationToken = default)
         {
             LastSelection = selection.ToArray();
+            LastParameters = new Dictionary<string, string>(parameters);
+            Executing?.Invoke(action);
             var id = Guid.NewGuid();
             var outcome = ExecutionOutcome;
             if (PromptDuringExecution)
@@ -358,10 +604,13 @@ public sealed class ConsoleTests
         public Task<IReadOnlyList<ObjectProperty>> InspectAsync(Guid resultId, Guid handle, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<ObjectProperty>>([new("Name", "string", "fixture")]);
         public Task<IReadOnlyList<ProviderInfo>> GetProvidersAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<ProviderInfo>>([new("Environment", "ShouldProcess")]);
-        public Task<IReadOnlyList<ConsoleNode>> GetDriveNodesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<ConsoleNode>>([new("env", "Env:", ResourceKind.ProviderPath, "Environment", "Env:")]);
-        public void ReleaseResult(Guid resultId) { }
+            Task.FromResult<IReadOnlyList<ProviderInfo>>([new("Environment", "ShouldProcess"), new("FileSystem", "ShouldProcess")]);
+        public Task<IReadOnlyList<ConsoleNode>> GetDriveNodesAsync(CancellationToken cancellationToken = default)
+        {
+            DriveReads++;
+            return Task.FromResult<IReadOnlyList<ConsoleNode>>(DriveNodes.ToArray());
+        }
+        public void ReleaseResult(Guid resultId) => Released.Add(resultId);
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }
 }

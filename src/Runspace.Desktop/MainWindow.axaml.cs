@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _active;
     private Guid? _promptInvocationId;
     private NavigationItem? _drivesRoot;
+    private (NavigationItem Item, bool Visible, string? Message, string Status)? _navigationWarning;
     private long _generation;
     private int _historyPosition = -1;
     private bool _closing;
@@ -181,17 +182,40 @@ public partial class MainWindow : Window
             item.IsLoading = true;
             try
             {
+                var generation = _generation;
                 BindHostPrompt(_generation, _lifetime.Token);
                 var result = await Session.QueryAsync(item.Node, _lifetime.Token);
                 try
                 {
                     AppendDiagnostics(result);
+                    if (_closing) return;
                     if (result.Outcome is InvocationOutcome.Failed or InvocationOutcome.Cancelled)
                         throw new InvalidOperationException(result.Diagnostics.LastOrDefault()?.Message ?? "Unable to load this resource. Collapse and expand to retry.");
                     item.Children.Clear();
                     foreach (var row in result.Rows.Where(row => row.RelatedNode is not null))
                         item.Children.Add(new(row.RelatedNode!, true));
-                    item.IsLazy = false;
+                    item.IsLazy = result.Outcome != InvocationOutcome.Completed;
+                    if (item.IsLazy)
+                    {
+                        if (item.Children.Count == 0)
+                            item.Children.Add(new(new("loading", "Expand to retry...", ResourceKind.Overview, string.Empty)));
+                        if (generation == _generation && !_model.IsBusy)
+                        {
+                            if (_navigationWarning?.Item != item)
+                                _navigationWarning = (item, ResultMessage.IsVisible, ResultMessageText.Text, _model.Status);
+                            _model.Status = $"{item.Name}: {result.Outcome}; navigation incomplete.";
+                            ResultMessage.IsVisible = true;
+                            ResultMessageText.Text = $"Navigation for {item.Name} is incomplete. Collapse and expand to retry; see Diagnostics." + ErrorSummary(result);
+                            DiagnosticsPane.IsVisible = true;
+                        }
+                    }
+                    else if (_navigationWarning is { } warning && warning.Item == item)
+                    {
+                        ResultMessage.IsVisible = warning.Visible;
+                        ResultMessageText.Text = warning.Message;
+                        _model.Status = warning.Status;
+                        _navigationWarning = null;
+                    }
                 }
                 finally { Session.ReleaseResult(result.Id); }
             }
@@ -202,6 +226,7 @@ public partial class MainWindow : Window
     private async Task NavigateAsync(ConsoleNode node, bool addHistory = true)
     {
         if (_closing) return;
+        _navigationWarning = null;
         var generation = ++_generation;
         _active?.Cancel();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -458,6 +483,7 @@ public partial class MainWindow : Window
     internal async Task InvokeActionAsync(ConsoleAction action)
     {
         if (!action.IsEnabled || _closing || _model.IsBusy) return;
+        _navigationWarning = null;
         var rows = action.Id is ConsoleActionId.AddDrive or ConsoleActionId.StartProcess ? [] : SelectedRows();
         var resultId = _result?.Id ?? Guid.Empty;
         var node = _currentNode;
@@ -780,6 +806,7 @@ public partial class MainWindow : Window
         _model.Diagnostics += $"{DateTimeOffset.Now:T} [Console error] {exception}\n";
         DiagnosticsPane.IsVisible = true;
         if (!updateView) return;
+        _navigationWarning = null;
         _model.Status = $"Error: {exception.Message}";
         ResultMessage.IsVisible = true;
         ResultMessageText.Text = exception.Message;

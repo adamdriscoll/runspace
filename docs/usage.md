@@ -89,6 +89,8 @@ Select one or multiple rows to see applicable operations. The Actions pane and r
 
 **Tools -> Go to provider path** accepts literal PowerShell provider paths, such as `Env:` or `C:\Windows`. Available providers and access permissions determine which paths can be browsed.
 
+Provider-tree expansion loads only that location's containers, not their descendants. Flat providers such as Environment, Alias, Variable, and Function still display their items in Results without invented child containers or mutation actions. Use the built-in **Environment** view to edit environment variables. Failed expansion remains retryable; partial expansion keeps usable children and shows an incomplete-navigation warning. Collapse and expand to retry.
+
 | Shortcut | Operation |
 | --- | --- |
 | F5 | Refresh the active resource |

@@ -23,6 +23,7 @@ public sealed class PowerShellSessionTests
             AssertRead(environment);
             Assert.Equal(["Name", "Value"], environment.Columns.Select(column => column.Key));
             Assert.Contains(environment.Diagnostics, record => record.Message.Contains("Source provider: Environment; drive: Env"));
+            Assert.All(environment.Rows, row => Assert.Null(row.RelatedNode));
             var row = environment.Rows.FirstOrDefault(row => row.Cells["Name"].Display == key);
             Assert.NotNull(row);
             Assert.Equal("actual-provider-value", row.Cells["Value"].Value);
@@ -31,10 +32,22 @@ public sealed class PowerShellSessionTests
             AssertRead(aliases);
             Assert.Equal(["Name", "Definition", "Options"], aliases.Columns.Select(column => column.Key));
             Assert.Contains(aliases.Diagnostics, record => record.Message.Contains("Source provider: Alias"));
+            Assert.All(aliases.Rows, row => Assert.Null(row.RelatedNode));
             var variables = await session.QueryAsync(new ConsoleNode("variable-direct", "Variables", ResourceKind.ProviderPath,
                 "Actual variable provider", "Variable:"));
             AssertRead(variables);
             Assert.Equal(["Name", "Value", "Options"], variables.Columns.Select(column => column.Key));
+            Assert.All(variables.Rows, row => Assert.Null(row.RelatedNode));
+            var functions = await session.QueryAsync(new ConsoleNode("function-direct", "Functions", ResourceKind.ProviderPath,
+                "Actual function provider", "Function:"));
+            AssertRead(functions);
+            Assert.Equal(["Name", "Definition"], functions.Columns.Select(column => column.Key));
+            Assert.All(functions.Rows, row => Assert.Null(row.RelatedNode));
+            var nestedEnvironment = await session.QueryAsync(new ConsoleNode("unsupported", "Unsupported environment container",
+                ResourceKind.ProviderPath, "Environment variables are leaves", $"Env:\\{key}\\child"));
+            Assert.NotEqual(InvocationOutcome.Completed, nestedEnvironment.Outcome);
+            Assert.Empty(nestedEnvironment.Rows);
+            Assert.Contains(nestedEnvironment.Diagnostics, record => record.Stream == "Error");
         }
         finally { Environment.SetEnvironmentVariable(key, null); }
     }
@@ -311,40 +324,55 @@ public sealed class PowerShellSessionTests
         Assert.Contains(providers, provider => provider.Name == "Environment");
         Assert.NotEmpty(await session.GetDriveNodesAsync());
 
-        var name = "Test" + Guid.NewGuid().ToString("N");
-        var root = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, ".runtime-tests", name, "quoted'[bracket];$(not-code)"));
-        Directory.CreateDirectory(Path.Combine(root, "child[one]"));
-        await File.WriteAllTextAsync(Path.Combine(root, "file' [one].txt"), "runtime-test");
-        var drives = await session.QueryAsync(Node(ResourceKind.Drives));
-        AssertCompleted(drives);
-        foreach (var row in drives.Rows.Where(row => row.Cells["Provider"].Display != "FileSystem"))
-        {
-            Assert.Null(row.Cells["Used"].Value);
-            Assert.Null(row.Cells["Used"].Error);
-            Assert.Null(row.Cells["Free"].Value);
-            Assert.Null(row.Cells["Free"].Error);
-        }
-        ConsoleResult? createdDrives = null;
+        var prefix = "Test" + Guid.NewGuid().ToString("N");
+        var name = prefix + "[one]'";
+        var decoyName = prefix + "o'";
+        var testDirectory = Path.Combine(Path.GetTempPath(), prefix);
+        var root = Path.Combine(testDirectory, "quoted'[bracket];$(not-code)" + (OperatingSystem.IsWindows() ? "" : "*?"));
+        var folderName = "child'[one]" + (OperatingSystem.IsWindows() ? "" : "*?");
+        var file = Path.Combine(root, "file' [one].txt");
         try
         {
+            Directory.CreateDirectory(Path.Combine(root, folderName));
+            Directory.CreateDirectory(Path.Combine(root, "child'o"));
+            await File.WriteAllTextAsync(file, "runtime-test");
+            await File.WriteAllTextAsync(Path.Combine(root, "child'o", "decoy.txt"), "must-not-be-returned");
+            var drives = await session.QueryAsync(Node(ResourceKind.Drives));
+            AssertCompleted(drives);
+            foreach (var drive in drives.Rows.Where(row => row.Cells["Provider"].Display != "FileSystem"))
+            {
+                Assert.Null(drive.Cells["Used"].Value);
+                Assert.Null(drive.Cells["Used"].Error);
+                Assert.Null(drive.Cells["Free"].Value);
+                Assert.Null(drive.Cells["Free"].Error);
+            }
             var add = await session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [],
                 new Dictionary<string, string> { ["Name"] = name, ["Provider"] = "FileSystem", ["Root"] = root });
             AssertCompleted(add);
             Assert.Contains("-Root " + PowerShellDisplay.Literal(root), add.Script);
             Assert.Contains("-Name " + PowerShellDisplay.Literal(name), add.Script);
-            createdDrives = await session.QueryAsync(Node(ResourceKind.Drives));
+            AssertCompleted(await session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [],
+                new Dictionary<string, string> { ["Name"] = decoyName, ["Provider"] = "FileSystem", ["Root"] = root }));
+            var createdDrives = await session.QueryAsync(Node(ResourceKind.Drives));
             AssertCompleted(createdDrives);
             var row = Assert.Single(createdDrives.Rows, row => row.Cells["Name"].Display == name);
             Assert.Equal("FileSystem", row.Cells["Provider"].Value);
             Assert.Equal(root, row.Cells["Root"].Value);
             Assert.NotNull(row.RelatedNode);
+            Assert.Contains(await session.GetDriveNodesAsync(), node => node.Path == $"{name}:\\");
+            await using var foreignSession = new PowerShellSession();
+            Assert.DoesNotContain(await foreignSession.GetDriveNodesAsync(), node => node.Path == $"{name}:\\");
             var children = await session.QueryAsync(row.RelatedNode!);
             AssertCompleted(children);
             Assert.Contains(children.Rows, child => child.Cells["Name"].Display == "file' [one].txt");
-            var folder = Assert.Single(children.Rows, child => child.Cells["Name"].Display == "child[one]");
+            Assert.Null(Assert.Single(children.Rows, child => child.Cells["Name"].Display == "file' [one].txt").RelatedNode);
+            var folder = Assert.Single(children.Rows, child => child.Cells["Name"].Display == folderName);
             Assert.NotNull(folder.RelatedNode);
             Assert.Equal("FileSystem", folder.RelatedNode.ProviderName);
-            AssertCompleted(await session.QueryAsync(folder.RelatedNode!));
+            await File.WriteAllTextAsync(Path.Combine(root, folderName, "added-after-parent-query.txt"), "lazy-child");
+            var nested = await session.QueryAsync(folder.RelatedNode!);
+            AssertCompleted(nested);
+            Assert.Equal("added-after-parent-query.txt", Assert.Single(nested.Rows).Cells["Name"].Value);
             var literal = await session.QueryAsync(new ConsoleNode("literal", "Literal", ResourceKind.ProviderPath, "Literal path", root));
             AssertCompleted(literal);
             Assert.Contains(literal.Rows, child => child.Cells["Name"].Display == "file' [one].txt");
@@ -353,19 +381,17 @@ public sealed class PowerShellSessionTests
 
             var remove = await session.ExecuteAsync(ConsoleActionId.RemoveDrive, createdDrives.Id, [row.Handle], new Dictionary<string, string>());
             AssertCompleted(remove);
+            Assert.Contains("-Name " + PowerShellDisplay.Literal(System.Management.Automation.WildcardPattern.Escape(name)), remove.Script);
             Assert.DoesNotContain(await session.GetDriveNodesAsync(), node => node.Path == $"{name}:\\");
-            Assert.True(File.Exists(Path.Combine(root, "file' [one].txt")));
+            Assert.Contains(await session.GetDriveNodesAsync(), node => node.Path == $"{decoyName}:\\");
+            Assert.True(Directory.Exists(root));
+            Assert.Equal("runtime-test", await File.ReadAllTextAsync(file));
+            Assert.Equal("lazy-child", await File.ReadAllTextAsync(Path.Combine(root, folderName, "added-after-parent-query.txt")));
         }
         finally
         {
-            // Removing this unique drive is safe even if an assertion failed before the normal removal.
-            if (createdDrives is not null)
-            {
-                var row = createdDrives.Rows.FirstOrDefault(row => row.Cells["Name"].Display == name);
-                if (row is not null)
-                    await session.ExecuteAsync(ConsoleActionId.RemoveDrive, createdDrives.Id, [row.Handle], new Dictionary<string, string>());
-            }
-            Directory.Delete(Path.GetFullPath(Path.Combine(root, "..")), true);
+            await session.DisposeAsync();
+            if (Directory.Exists(testDirectory)) Directory.Delete(testDirectory, true);
         }
     }
 
@@ -373,8 +399,9 @@ public sealed class PowerShellSessionTests
     public async Task MaintainsEnvironmentAndBindsValuesWithoutScriptInjection()
     {
         await using var session = new PowerShellSession();
-        var key = "RUNSPACE_TEST_" + Guid.NewGuid().ToString("N");
-        var secondKey = key + "_SECOND";
+        var prefix = "RUNSPACE_TEST_" + Guid.NewGuid().ToString("N");
+        var key = prefix + "'[one]*?;$(not-code)";
+        var secondKey = prefix + "'oXX;$(not-code)";
         Environment.SetEnvironmentVariable(key, "before");
         Environment.SetEnvironmentVariable(secondKey, "before");
         try
@@ -389,6 +416,11 @@ public sealed class PowerShellSessionTests
             AssertCompleted(edited);
             Assert.Contains("-LiteralPath " + PowerShellDisplay.Literal($"Env:\\{key}"), edited.Script);
             Assert.Contains("-Value " + PowerShellDisplay.Literal(literal), edited.Script);
+            var literalItem = await session.QueryAsync(new ConsoleNode("literal-env", "Literal environment item",
+                ResourceKind.ProviderPath, "Literal path", $"Env:\\{key}"));
+            AssertCompleted(literalItem);
+            Assert.Equal(literal, Assert.Single(literalItem.Rows).Cells["Value"].Value);
+            Assert.Equal("before", Environment.GetEnvironmentVariable(secondKey));
             AssertCompleted(await session.ExecuteAsync(ConsoleActionId.SetValue, result.Id, [secondRow.Handle],
                 new Dictionary<string, string> { ["Value"] = literal }));
             var refreshed = await session.QueryAsync(Node(ResourceKind.Environment));
@@ -411,18 +443,60 @@ public sealed class PowerShellSessionTests
     public async Task RejectsReleasedUnknownAndMismatchedHandlesBeforeMutation()
     {
         await using var session = new PowerShellSession();
-        var result = await session.QueryAsync(Node(ResourceKind.Environment));
-        AssertCompleted(result);
-        var unknown = await session.ExecuteAsync(ConsoleActionId.RemoveItem, result.Id, [Guid.NewGuid()], new Dictionary<string, string>());
-        Assert.Equal(InvocationOutcome.Failed, unknown.Outcome);
-        Assert.Contains(unknown.Diagnostics, diagnostic => diagnostic.Message.Contains("stale"));
-        var row = Assert.Single(result.Rows.Take(1));
-        var mismatch = await session.ExecuteAsync(ConsoleActionId.StopProcess, result.Id, [row.Handle], new Dictionary<string, string>());
-        Assert.Equal(InvocationOutcome.Failed, mismatch.Outcome);
-        session.ReleaseResult(result.Id);
-        var stale = await session.ExecuteAsync(ConsoleActionId.RemoveItem, result.Id, [row.Handle], new Dictionary<string, string>());
-        Assert.Equal(InvocationOutcome.Failed, stale.Outcome);
-        Assert.Contains(stale.Diagnostics, diagnostic => diagnostic.Message.Contains("released"));
+        await using var foreignSession = new PowerShellSession();
+        var key = "RUNSPACE_TEST_" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable(key, "unchanged");
+        var prompts = 0;
+        session.PromptHandler = (_, _) =>
+        {
+            prompts++;
+            return Task.FromResult<HostResponse?>(null);
+        };
+        try
+        {
+            var result = await session.QueryAsync(Node(ResourceKind.Environment));
+            AssertCompleted(result);
+            var row = Assert.Single(result.Rows, row => row.Cells["Name"].Display == key);
+            var foreign = await foreignSession.QueryAsync(Node(ResourceKind.Environment));
+            AssertCompleted(foreign);
+            var foreignRow = Assert.Single(foreign.Rows, row => row.Cells["Name"].Display == key);
+            var refreshed = await session.QueryAsync(Node(ResourceKind.Environment));
+            AssertCompleted(refreshed);
+            var unknown = Guid.NewGuid();
+            foreach (var (resultId, handle, diagnostic) in new[]
+            {
+                (result.Id, unknown, "stale"),
+                (result.Id, foreignRow.Handle, "stale"),
+                (foreign.Id, foreignRow.Handle, "released"),
+                (refreshed.Id, row.Handle, "stale"),
+                (Guid.NewGuid(), row.Handle, "released")
+            })
+            {
+                var rejected = await session.ExecuteAsync(ConsoleActionId.RemoveItem, resultId, [handle],
+                    new Dictionary<string, string> { ["Confirm"] = "True" });
+                Assert.Equal(InvocationOutcome.Failed, rejected.Outcome);
+                Assert.Contains(rejected.Diagnostics, record => record.Stream == "Error" && record.Message.Contains(diagnostic));
+                await Assert.ThrowsAsync<InvalidOperationException>(() => session.InspectAsync(resultId, handle));
+                Assert.Equal("unchanged", Environment.GetEnvironmentVariable(key));
+            }
+            var mixed = await session.ExecuteAsync(ConsoleActionId.RemoveItem, result.Id, [row.Handle, unknown],
+                new Dictionary<string, string>());
+            Assert.Equal(InvocationOutcome.Failed, mixed.Outcome);
+            Assert.Contains(mixed.Diagnostics, record => record.Message.Contains("stale"));
+            var mismatch = await session.ExecuteAsync(ConsoleActionId.StopProcess, result.Id, [row.Handle],
+                new Dictionary<string, string>());
+            Assert.Equal(InvocationOutcome.Failed, mismatch.Outcome);
+            Assert.Contains(mismatch.Diagnostics, record => record.Message.Contains("does not apply"));
+            session.ReleaseResult(result.Id);
+            var stale = await session.ExecuteAsync(ConsoleActionId.RemoveItem, result.Id, [row.Handle],
+                new Dictionary<string, string> { ["Confirm"] = "True" });
+            Assert.Equal(InvocationOutcome.Failed, stale.Outcome);
+            Assert.Contains(stale.Diagnostics, record => record.Message.Contains("released"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => session.InspectAsync(result.Id, row.Handle));
+            Assert.Equal(0, prompts);
+            Assert.Equal("unchanged", Environment.GetEnvironmentVariable(key));
+        }
+        finally { Environment.SetEnvironmentVariable(key, null); }
     }
 
     [Fact]
@@ -512,7 +586,14 @@ public sealed class PowerShellSessionTests
         AssertCompleted(await session.QueryAsync(Node(ResourceKind.NetworkInterfaces)));
         if (!OperatingSystem.IsWindows())
         {
-            foreach (var node in BuiltInCatalog.LocalSystem.Where(node => node.WindowsOnly))
+            var related = new[]
+            {
+                new ConsoleNode("events", "Event entries", ResourceKind.EventEntries, "Windows event entries", "Application"),
+                new ConsoleNode("members", "Group members", ResourceKind.GroupMembers, "Windows group members", "Users"),
+                new ConsoleNode("classes", "CIM classes", ResourceKind.WmiClasses, "Windows CIM classes", "root\\cimv2"),
+                new ConsoleNode("instances", "CIM instances", ResourceKind.WmiInstances, "Windows CIM instances", "root\\cimv2|Win32_Process")
+            };
+            foreach (var node in BuiltInCatalog.LocalSystem.Where(node => node.WindowsOnly).Concat(related))
             {
                 var result = await session.QueryAsync(node);
                 Assert.Equal(InvocationOutcome.Failed, result.Outcome);
@@ -520,6 +601,60 @@ public sealed class PowerShellSessionTests
                 Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Stream == "Error" && diagnostic.Message.Contains("Windows"));
             }
         }
+    }
+
+    [Fact]
+    public async Task MissingProviderCreationReportsAnErrorAndLeavesSessionDrivesUnchanged()
+    {
+        await using var session = new PowerShellSession();
+        var drives = await session.QueryAsync(Node(ResourceKind.Drives));
+        AssertCompleted(drives);
+        var name = "RunspaceMissing" + Guid.NewGuid().ToString("N");
+        var provider = "MissingProvider" + Guid.NewGuid().ToString("N");
+        var failed = await session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [],
+            new Dictionary<string, string> { ["Name"] = name, ["Provider"] = provider, ["Root"] = Path.GetTempPath() });
+        Assert.Equal(InvocationOutcome.Failed, failed.Outcome);
+        Assert.Empty(failed.Rows);
+        Assert.Contains(failed.Diagnostics, record => record.Stream == "Error" && record.Message.Contains(provider));
+        Assert.DoesNotContain(await session.GetDriveNodesAsync(), node => node.Path == $"{name}:\\");
+        AssertCompleted(await session.QueryAsync(Node(ResourceKind.Environment)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WindowsServiceModuleAndPermissionFailuresAreNotEmptySuccesses(bool permissionDenied)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await using var session = new PowerShellSession();
+        AssertCompleted(await session.QueryAsync(Node(ResourceKind.Providers)));
+        if (permissionDenied)
+        {
+            AssertCompleted(await session.InvokeForTestingAsync("""
+                function global:Get-Service {
+                    [CmdletBinding()]
+                    param()
+                    throw [UnauthorizedAccessException]::new('runspace-fixture-permission-denied')
+                }
+                """));
+        }
+        else
+        {
+            AssertCompleted(await session.InvokeForTestingAsync("""
+                Get-Module Microsoft.PowerShell.Management | Remove-Module -ErrorAction Stop
+                $global:PSModuleAutoLoadingPreference = 'None'
+                """));
+        }
+        var failed = await session.QueryAsync(Node(ResourceKind.Services));
+        Assert.Equal(InvocationOutcome.Failed, failed.Outcome);
+        Assert.Empty(failed.Rows);
+        Assert.Contains(failed.Diagnostics, record => record.Stream == "Error"
+            && record.Message.Contains(permissionDenied ? "runspace-fixture-permission-denied" : "Get-Service"));
+        AssertCompleted(await session.InvokeForTestingAsync(permissionDenied
+            ? "Remove-Item -LiteralPath Function:\\Get-Service -ErrorAction Stop"
+            : "$global:PSModuleAutoLoadingPreference = 'All'"));
+        AssertCompleted(await session.QueryAsync(Node(ResourceKind.Providers)));
+        AssertRead(await session.QueryAsync(Node(ResourceKind.Services)));
     }
 
     [Fact]
