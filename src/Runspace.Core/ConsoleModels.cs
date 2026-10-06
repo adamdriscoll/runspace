@@ -76,7 +76,8 @@ public sealed record ConsoleResult(
     string Script,
     IReadOnlyList<DiagnosticRecord> Diagnostics,
     TimeSpan Duration,
-    InvocationOutcome Outcome);
+    InvocationOutcome Outcome,
+    bool OutputSuppressed = false);
 
 public enum ConsoleActionId
 {
@@ -84,7 +85,8 @@ public enum ConsoleActionId
     AddDrive, RemoveDrive, SetValue, RemoveItem, ProcessModules, ProcessThreads, SetProcessPriority, StartProcess
 }
 
-public sealed record ActionParameter(string Name, string Label, bool Required = true, string? DefaultValue = null);
+public sealed record ActionParameter(string Name, string Label, bool Required = true, string? DefaultValue = null,
+    IReadOnlyList<string>? Choices = null);
 
 public sealed record ConsoleAction(
     ConsoleActionId Id,
@@ -93,7 +95,13 @@ public sealed record ConsoleAction(
     string Description,
     bool IsEnabled,
     bool RequiresConfirmation = false,
-    IReadOnlyList<ActionParameter>? Parameters = null);
+    IReadOnlyList<ActionParameter>? Parameters = null,
+    ActionResultPolicy ResultPolicy = ActionResultPolicy.Refresh)
+{
+    public bool SupportsShouldProcess => Id is ConsoleActionId.StopProcess or ConsoleActionId.StartProcess
+        or ConsoleActionId.StartService or ConsoleActionId.StopService or ConsoleActionId.RestartService
+        or ConsoleActionId.AddDrive or ConsoleActionId.RemoveDrive or ConsoleActionId.SetValue or ConsoleActionId.RemoveItem;
+}
 
 public interface IConsoleSession : IAsyncDisposable
 {

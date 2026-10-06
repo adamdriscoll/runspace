@@ -49,6 +49,16 @@ The shell has splitters and tabs rather than a floating dock manager. CSV export
 
 Mutating actions bind parameters and act on fixed selected handles. UI confirmation does not grant elevated rights. Cancellation is cooperative, and a refreshed table after partial errors is not reported as proof that every action succeeded.
 
+The embedded custom host binds each parameter, choice, credential, and secure-input request to session/invocation/prompt identifiers. The engine thread waits for an asynchronous owned-window response; the dispatcher never waits synchronously. Stop, prompt dismissal, and session/application shutdown release host input and produce Cancelled. Unsupported raw-terminal operations fail explicitly. Delayed native calls stay visibly stopping/unresponsive without active-pipeline disposal.
+
+Interactive history is non-replayable. Secure-input invocations discard returned object graphs and redact command/diagnostic text rather than attempting unreliable secret detection. The invocation owns and disposes accepted secure values. This does not prevent arbitrary scripts from copying values into session state or sending them elsewhere.
+
+### Cancellation reference gate
+
+The real-runtime `InvocationHostTests.StopSleepReachesCancelledWithinTwoSecondsAndNextQuerySucceeds` measures from cancellation request to terminal Cancelled, not from invocation startup. It retains partial output and then verifies a subsequent provider query. The two-second threshold is enforced by both the test timeout and elapsed-time assertion.
+
+Reference host (2026-10-06): Windows 11 Business 10.0.26200, Intel Core Ultra 9 285HX, 24 cores/logical processors, .NET SDK 10.0.401/runtime 10.0.12, embedded PowerShell 7.6.6, Debug tests. A solution-suite run recorded **9.1 ms** from Stop request to terminal Cancelled for Start-Sleep and **21.7 ms** for prompt cancellation followed by a queued query. This is a cooperative gate, not a guarantee for other hardware or native calls. A separate native-wait fixture signals from inside its non-cooperative call and remains blocked until the test explicitly releases it. Both immediate and delayed host responses verify the unresponsive state, continued queue ownership, safe eventual cancellation, and session reuse without relying on a fixed sleep or pre-call readiness signal. Headless Avalonia tests cover Stop/application-close dismissal, dispatcher-safe validation, masked/cleared secrets, and selection changes during prompting; the disposable-child fixture covers WhatIf and command-confirmed Stop-Process.
+
 ## Development targets
 
 `global.json`, public NuGet configuration, and package lock files express the local/CI build baseline. `.vscode/tasks.json` includes build, test, launch, and publish targets; `.vscode/launch.json` launches the desktop DLL through the C# debugger.

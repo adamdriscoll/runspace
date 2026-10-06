@@ -41,9 +41,11 @@ public static class BuiltInCatalog
                     Parameters: [new("FilePath", "Executable"), new("Arguments", "Arguments", false)]));
                 actions.Add(new(ConsoleActionId.StopProcess, "Stop process...", "General", "Stop the selected processes.", count > 0, true));
                 actions.Add(new(ConsoleActionId.SetProcessPriority, "Set priority class...", "General", "Set the selected process's priority (Windows).", single && OperatingSystem.IsWindows(), true,
-                    [new("Priority", "Priority (Idle, BelowNormal, Normal, AboveNormal, High)", DefaultValue: "Normal")]));
-                actions.Add(new(ConsoleActionId.ProcessModules, "DLLs / modules", "Related information", "Inspect the selected process's loaded modules.", single));
-                actions.Add(new(ConsoleActionId.ProcessThreads, "Threads", "Related information", "Inspect the selected process's threads.", single));
+                    [new("Priority", "Priority", DefaultValue: "Normal", Choices: ["Idle", "BelowNormal", "Normal", "AboveNormal", "High"])]));
+                actions.Add(new(ConsoleActionId.ProcessModules, "DLLs / modules", "Related information", "Inspect the selected process's loaded modules.", single,
+                    ResultPolicy: ActionResultPolicy.Related));
+                actions.Add(new(ConsoleActionId.ProcessThreads, "Threads", "Related information", "Inspect the selected process's threads.", single,
+                    ResultPolicy: ActionResultPolicy.Related));
                 break;
             case ResourceKind.Services:
                 actions.Add(new(ConsoleActionId.StartService, "Start service", "Service", "Start the selected services.", count > 0, true));

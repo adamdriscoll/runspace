@@ -12,6 +12,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Runspace.Core;
 using Runspace.Desktop.ViewModels;
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<ConsoleRow> _rows = [];
     private DataGridCollectionView? _view;
     private CancellationTokenSource? _active;
+    private Guid? _promptInvocationId;
     private NavigationItem? _drivesRoot;
     private long _generation;
     private int _historyPosition = -1;
@@ -97,6 +99,12 @@ public partial class MainWindow : Window
         }
         _model.IsBusy = true;
         _session ??= await Task.Run<IConsoleSession>(() => new PowerShellSession(), _lifetime.Token);
+        if (_session is IInvocationHostSession interactive)
+        {
+            interactive.PromptHandler = async (prompt, token) =>
+                await Dispatcher.UIThread.InvokeAsync(() => PresentHostPromptAsync(prompt, token));
+            interactive.StateChanged += InvocationStateChanged;
+        }
         _model.Runtime = $"Local / PowerShell {_session.RuntimeVersion}";
         await RefreshDrivesAsync();
         _model.IsBusy = false;
@@ -104,6 +112,37 @@ public partial class MainWindow : Window
     }
 
     private IConsoleSession Session => _session ?? throw new InvalidOperationException("PowerShell is not ready. Check Diagnostics for startup errors.");
+
+    private async Task<HostResponse?> PresentHostPromptAsync(HostPrompt prompt, CancellationToken token)
+    {
+        if (_closing) return null;
+        var wasBusy = _model.IsBusy;
+        _promptInvocationId = prompt.InvocationId;
+        _model.IsBusy = true;
+        UpdateActions();
+        try { return await Dialogs.HostPromptAsync(this, prompt, token); }
+        finally
+        {
+            _promptInvocationId = null;
+            if (!wasBusy && _active is null)
+            {
+                _model.IsBusy = false;
+                UpdateActions();
+            }
+        }
+    }
+
+    private void InvocationStateChanged(InvocationStatus status) => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_model.IsBusy && !_closing) return;
+        _model.Status = status.State switch
+        {
+            InvocationState.AwaitingInput => "Awaiting PowerShell input...",
+            InvocationState.Stopping => "Stopping...",
+            InvocationState.Unresponsive => "Stopping / unresponsive. A native call may still be active; hard termination is not guaranteed.",
+            _ => "Running..."
+        };
+    });
 
     private async Task RefreshDrivesAsync()
     {
@@ -198,6 +237,7 @@ public partial class MainWindow : Window
                 InvocationOutcome.Failed => "Query failed. See Diagnostics; this is not an empty successful result.",
                 InvocationOutcome.Cancelled => "Query cancelled. Displayed results may be incomplete.",
                 InvocationOutcome.CompletedWithErrors => "Some objects could not be retrieved or evaluated. See Diagnostics.",
+                _ when result.OutputSuppressed => "Output withheld because this invocation used credentials/secure input. See Diagnostics.",
                 _ when result.Rows.Count == 0 => "No objects were returned.",
                 _ => string.Empty
             };
@@ -379,9 +419,9 @@ public partial class MainWindow : Window
         return panel;
     }
 
-    private async Task InvokeActionAsync(ConsoleAction action)
+    internal async Task InvokeActionAsync(ConsoleAction action)
     {
-        if (!action.IsEnabled || _closing) return;
+        if (!action.IsEnabled || _closing || _model.IsBusy) return;
         var rows = action.Id is ConsoleActionId.AddDrive or ConsoleActionId.StartProcess ? [] : SelectedRows();
         var resultId = _result?.Id ?? Guid.Empty;
         var node = _currentNode;
@@ -393,12 +433,6 @@ public partial class MainWindow : Window
             case ConsoleActionId.Properties when rows.Count == 1:
                 await Dialogs.PropertiesAsync(this, rows[0].Label, await Session.InspectAsync(resultId, rows[0].Handle, _lifetime.Token));
                 return;
-            case ConsoleActionId.ProcessModules or ConsoleActionId.ProcessThreads when rows.Count == 1:
-                var processId = rows[0].Cells.GetValueOrDefault("Id")?.Value?.ToString()
-                    ?? throw new InvalidOperationException("The selected object has no process identity.");
-                var kind = action.Id == ConsoleActionId.ProcessModules ? ResourceKind.ProcessModules : ResourceKind.ProcessThreads;
-                await NavigateAsync(new($"{kind}:{processId}", $"{rows[0].Label} - {action.Name}", kind, action.Description, processId));
-                return;
             case ConsoleActionId.Copy:
                 if (Clipboard is not { } clipboard) throw new NotSupportedException("The platform clipboard is unavailable.");
                 await clipboard.SetTextAsync(TabularText(rows, "\t"));
@@ -408,22 +442,6 @@ public partial class MainWindow : Window
                 await ExportAsync();
                 return;
         }
-        var context = $"Local session\n{action.Description}\n" + (rows.Count == 0 ? string.Empty : string.Join(", ", rows.Take(8).Select(row => row.Label)));
-        IReadOnlyDictionary<string, string> parameters = new Dictionary<string, string>();
-        if (action.Parameters is { Count: > 0 })
-        {
-            var providers = action.Id == ConsoleActionId.AddDrive ? await Session.GetProvidersAsync(_lifetime.Token) : null;
-            var value = rows.Count == 1 ? rows[0].Cells.GetValueOrDefault("Value")?.Display : null;
-            var response = await Dialogs.ParametersAsync(this, action, context, providers, value);
-            if (response is null) return;
-            parameters = response;
-        }
-        if (action.RequiresConfirmation && !await Dialogs.ConfirmAsync(this, action.Name,
-                $"{context}\n\nExecute on {rows.Count} selected object(s)? This operation may change system state and requires your current account's permissions."))
-            return;
-        if (_result?.Id != resultId && resultId != Guid.Empty)
-            throw new InvalidOperationException("The result changed while this action was being prepared. Select the objects again.");
-
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var generation = _generation;
         _active = cancellation;
@@ -432,26 +450,83 @@ public partial class MainWindow : Window
         UpdateActions();
         try
         {
+            var context = $"Local session\n{action.Description}\n" + (rows.Count == 0 ? string.Empty : string.Join(", ", rows.Take(8).Select(row => row.Label)));
+            var promptAction = action.SupportsShouldProcess ? action with
+            {
+                Parameters = [.. action.Parameters ?? [], new("WhatIf", "Preview only (PowerShell WhatIf)", DefaultValue: "False", Choices: ["False", "True"])]
+            } : action;
+            var parameters = new Dictionary<string, string>();
+            if (promptAction.Parameters is { Count: > 0 })
+            {
+                _model.Status = $"Awaiting parameters for {action.Name}...";
+                var providers = action.Id == ConsoleActionId.AddDrive ? await Session.GetProvidersAsync(cancellation.Token) : null;
+                var value = rows.Count == 1 ? rows[0].Cells.GetValueOrDefault("Value")?.Display : null;
+                var response = await Dialogs.ParametersAsync(this, promptAction, context, providers, value, cancellation.Token);
+                if (response is null) { _model.Status = $"{action.Name}: Cancelled"; return; }
+                parameters = new Dictionary<string, string>(response);
+            }
+            if (action.RequiresConfirmation)
+            {
+                if (action.SupportsShouldProcess)
+                    parameters["Confirm"] = "True";
+                else if (!await Dialogs.ConfirmAsync(this, action.Name,
+                    $"{context}\n\nExecute on {rows.Count} fixed object(s)? This operation may change system state.", cancellation.Token))
+                { _model.Status = $"{action.Name}: Cancelled"; return; }
+            }
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (_result?.Id != resultId && resultId != Guid.Empty)
+                throw new InvalidOperationException("The result changed while this action was being prepared. Select the objects again.");
+            _model.Status = $"Running {action.Name}...";
             var result = await Session.ExecuteAsync(action.Id, resultId, rows.Select(row => row.Handle).ToArray(), parameters, cancellation.Token);
             RecordInvocation(action.Name, result);
-            Session.ReleaseResult(result.Id);
-            _model.Status = $"{action.Name}: {result.Outcome}";
-            if (result.Outcome is InvocationOutcome.Failed or InvocationOutcome.Cancelled)
+            var retained = false;
+            try
             {
-                ResultMessage.IsVisible = true;
-                ResultMessageText.Text = $"{action.Name}: {result.Outcome}. See Diagnostics.";
-                return;
+                if (!_closing && generation == _generation)
+                {
+                    switch (action.ResultPolicy)
+                    {
+                        case ActionResultPolicy.Refresh:
+                            if (action.Id is ConsoleActionId.AddDrive or ConsoleActionId.RemoveDrive)
+                                await RefreshDrivesAsync();
+                            if (node is not null && _currentNode == node) await NavigateAsync(node, false);
+                            break;
+                        case ActionResultPolicy.Replace:
+                        case ActionResultPolicy.Related:
+                            if (action.ResultPolicy == ActionResultPolicy.Related && rows.Count == 1)
+                            {
+                                var kind = action.Id == ConsoleActionId.ProcessModules ? ResourceKind.ProcessModules : ResourceKind.ProcessThreads;
+                                var related = new ConsoleNode($"{kind}:{rows[0].Handle}", $"{rows[0].Label} - {action.Name}", kind,
+                                    action.Description, rows[0].Cells.GetValueOrDefault("Id")?.Value?.ToString());
+                                if (_historyPosition < _navigationHistory.Count - 1)
+                                    _navigationHistory.RemoveRange(_historyPosition + 1, _navigationHistory.Count - _historyPosition - 1);
+                                _navigationHistory.Add(related);
+                                _historyPosition = _navigationHistory.Count - 1;
+                                _currentNode = related;
+                                _model.Title = related.Name;
+                                _model.Description = related.Description;
+                                UpdateNavigationButtons();
+                            }
+                            ReleaseCurrentResult();
+                            _result = result;
+                            retained = true;
+                            Display(result.Columns, result.Rows);
+                            _model.Script = result.Script;
+                            break;
+                        case ActionResultPolicy.Retain:
+                            break;
+                    }
+                    _model.Status = $"{action.Name}: {result.Outcome}";
+                    if (result.Outcome != InvocationOutcome.Completed || result.OutputSuppressed)
+                    {
+                        ResultMessage.IsVisible = true;
+                        ResultMessageText.Text = result.OutputSuppressed
+                            ? $"{action.Name}: {result.Outcome}. Output withheld because this invocation used credentials/secure input; see Diagnostics."
+                            : $"{action.Name}: {result.Outcome}. Partial operations/results may remain; see Diagnostics.";
+                    }
+                }
             }
-            if (action.Id is ConsoleActionId.AddDrive or ConsoleActionId.RemoveDrive)
-                await RefreshDrivesAsync();
-            if (node is not null && _currentNode == node)
-                await NavigateAsync(node, false);
-            if (result.Outcome == InvocationOutcome.CompletedWithErrors)
-            {
-                ResultMessage.IsVisible = true;
-                ResultMessageText.Text = $"{action.Name} completed with errors. The refreshed table does not mean every operation succeeded.";
-                _model.Status = $"{action.Name}: completed with errors. See Diagnostics.";
-            }
+            finally { if (!retained) Session.ReleaseResult(result.Id); }
         }
         finally
         {
@@ -477,7 +552,7 @@ public partial class MainWindow : Window
     {
         foreach (var record in result.Diagnostics)
             _model.Diagnostics += $"{record.Timestamp:T} [{record.Stream}] {record.Message}\n";
-        if (result.Outcome is not InvocationOutcome.Completed)
+        if (result.Outcome is not InvocationOutcome.Completed || result.OutputSuppressed)
             DiagnosticsPane.IsVisible = true;
     }
 
@@ -655,13 +730,24 @@ public partial class MainWindow : Window
             ReleaseCurrentResult();
             if (_session is not null) await _session.DisposeAsync();
         });
+        if (_session is IInvocationHostSession interactive)
+        {
+            interactive.StateChanged -= InvocationStateChanged;
+            interactive.PromptHandler = null;
+        }
         _lifetime.Dispose();
         _readyToClose = true;
         Close();
     }
 
     private async void RefreshClick(object? sender, RoutedEventArgs e) => await SafeAsync(RefreshAsync);
-    private void StopClick(object? sender, RoutedEventArgs e) { _active?.Cancel(); _model.Status = "Stopping..."; }
+    private void StopClick(object? sender, RoutedEventArgs e)
+    {
+        _active?.Cancel();
+        if (_promptInvocationId is { } id && _session is IInvocationHostSession interactive)
+            interactive.StopInvocation(id);
+        _model.Status = "Stopping...";
+    }
     private async void BackClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => MoveHistoryAsync(-1));
     private async void ForwardClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => MoveHistoryAsync(1));
     private async void GoClick(object? sender, RoutedEventArgs e) => await SafeAsync(GoAsync);
