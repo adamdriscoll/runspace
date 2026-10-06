@@ -5,10 +5,35 @@ namespace Runspace.Desktop;
 internal static class Program
 {
     internal static PublishValidation? Validation { get; private set; }
+    internal static ResultBenchmark? Benchmark { get; private set; }
 
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--benchmark-results")
+        {
+            if (args.Length != 2)
+            {
+                Console.Error.WriteLine("Usage: Runspace.Desktop --benchmark-results <report.json>");
+                return 2;
+            }
+#if DEBUG
+            Console.Error.WriteLine("Result benchmarks require a Release build.");
+            return 2;
+#else
+            Benchmark = new ResultBenchmark(System.IO.Path.GetFullPath(args[1]));
+            try
+            {
+                BuildAvaloniaApp().StartWithClassicDesktopLifetime([]);
+                return Benchmark.ExitCode;
+            }
+            catch (Exception exception)
+            {
+                Benchmark.Fail(exception);
+                return 1;
+            }
+#endif
+        }
         if (args.Length > 0 && args[0] == "--validate-publish")
         {
             if (args.Length != 2)

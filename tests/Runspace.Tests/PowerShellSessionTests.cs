@@ -249,6 +249,8 @@ public sealed class PowerShellSessionTests
             Assert.Equal(queried.Columns.Select(column => column.Key), executed.Columns.Select(column => column.Key));
             Assert.Contains("Session-dependent", executed.Script);
             Assert.Contains(Environment.ProcessId.ToString(), executed.Script);
+            session.ReleaseResult(queried.Id);
+            session.ReleaseResult(executed.Id);
         }
         var invalid = await session.QueryAsync(new ConsoleNode("invalid", "Invalid", ResourceKind.ProcessModules, "Invalid process Id", "1; throw 'injected'"));
         Assert.Equal(InvocationOutcome.Failed, invalid.Outcome);
@@ -351,8 +353,12 @@ public sealed class PowerShellSessionTests
             AssertCompleted(add);
             Assert.Contains("-Root " + PowerShellDisplay.Literal(root), add.Script);
             Assert.Contains("-Name " + PowerShellDisplay.Literal(name), add.Script);
-            AssertCompleted(await session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [],
-                new Dictionary<string, string> { ["Name"] = decoyName, ["Provider"] = "FileSystem", ["Root"] = root }));
+            session.ReleaseResult(add.Id);
+            var addDecoy = await session.ExecuteAsync(ConsoleActionId.AddDrive, drives.Id, [],
+                new Dictionary<string, string> { ["Name"] = decoyName, ["Provider"] = "FileSystem", ["Root"] = root });
+            AssertCompleted(addDecoy);
+            session.ReleaseResult(addDecoy.Id);
+            session.ReleaseResult(drives.Id);
             var createdDrives = await session.QueryAsync(Node(ResourceKind.Drives));
             AssertCompleted(createdDrives);
             var row = Assert.Single(createdDrives.Rows, row => row.Cells["Name"].Display == name);
@@ -369,15 +375,18 @@ public sealed class PowerShellSessionTests
             var folder = Assert.Single(children.Rows, child => child.Cells["Name"].Display == folderName);
             Assert.NotNull(folder.RelatedNode);
             Assert.Equal("FileSystem", folder.RelatedNode.ProviderName);
+            session.ReleaseResult(children.Id);
             await File.WriteAllTextAsync(Path.Combine(root, folderName, "added-after-parent-query.txt"), "lazy-child");
             var nested = await session.QueryAsync(folder.RelatedNode!);
             AssertCompleted(nested);
             Assert.Equal("added-after-parent-query.txt", Assert.Single(nested.Rows).Cells["Name"].Value);
+            session.ReleaseResult(nested.Id);
             var literal = await session.QueryAsync(new ConsoleNode("literal", "Literal", ResourceKind.ProviderPath, "Literal path", root));
             AssertCompleted(literal);
             Assert.Contains(literal.Rows, child => child.Cells["Name"].Display == "file' [one].txt");
             Assert.Contains(literal.Columns, column => column.Key == "Length");
             Assert.Contains(literal.Diagnostics, record => record.Message.Contains("Source provider: FileSystem"));
+            session.ReleaseResult(literal.Id);
 
             var remove = await session.ExecuteAsync(ConsoleActionId.RemoveDrive, createdDrives.Id, [row.Handle], new Dictionary<string, string>());
             AssertCompleted(remove);
@@ -670,8 +679,11 @@ public sealed class PowerShellSessionTests
             if (kind == ResourceKind.LocalGroups)
             {
                 var group = Assert.Single(result.Rows.Take(1));
-                AssertRead(await session.QueryAsync(group.RelatedNode!));
+                var members = await session.QueryAsync(group.RelatedNode!);
+                AssertRead(members);
+                session.ReleaseResult(members.Id);
             }
+            session.ReleaseResult(result.Id);
         }
         var logs = await session.QueryAsync(Node(ResourceKind.EventLogs));
         AssertRead(logs);
@@ -681,19 +693,24 @@ public sealed class PowerShellSessionTests
             var entries = await session.QueryAsync(populatedLog.RelatedNode!);
             AssertRead(entries);
             Assert.InRange(entries.Rows.Count, 1, 200);
+            session.ReleaseResult(entries.Id);
         }
+        session.ReleaseResult(logs.Id);
         var registry = await session.QueryAsync(Node(ResourceKind.Registry));
         AssertCompleted(registry);
         Assert.Equal(2, registry.Rows.Count);
         var keys = await session.QueryAsync(registry.Rows[1].RelatedNode!);
+        session.ReleaseResult(registry.Id);
         AssertRead(keys);
         Assert.NotEmpty(keys.Rows);
         Assert.NotEmpty(await session.InspectAsync(keys.Id, keys.Rows[0].Handle));
+        session.ReleaseResult(keys.Id);
         var namespaces = await session.QueryAsync(Node(ResourceKind.WmiNamespaces));
         AssertRead(namespaces);
         Assert.NotEmpty(namespaces.Rows);
         var classesNode = Assert.Single(namespaces.Rows, row => row.RelatedNode?.Kind == ResourceKind.WmiClasses).RelatedNode!;
         var classes = await session.QueryAsync(classesNode);
+        session.ReleaseResult(namespaces.Id);
         AssertRead(classes);
         var namespaceClass = Assert.Single(classes.Rows, row => row.Cells["CimClassName"].Display.Equals("__Namespace", StringComparison.OrdinalIgnoreCase));
         AssertRead(await session.QueryAsync(namespaceClass.RelatedNode!));
