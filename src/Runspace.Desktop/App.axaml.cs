@@ -11,7 +11,11 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            desktop.MainWindow = new MainWindow();
+        {
+            var window = Program.Validation is null ? new MainWindow() : new MainWindow(null, persistLayout: false);
+            desktop.MainWindow = window;
+            Program.Validation?.Attach(window);
+        }
         base.OnFrameworkInitializationCompleted();
     }
 }

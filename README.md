@@ -27,7 +27,7 @@ dotnet build Runspace.slnx
 dotnet run --project .\src\Runspace.Desktop\Runspace.Desktop.csproj
 ```
 
-For macOS/Linux launch commands, native dependencies, and CI build artifacts, see the [usage guide](docs/usage.md#launching-runspace).
+For published executables, macOS/Linux launch commands, native dependencies, and the verified platform matrix, see the [usage guide](docs/usage.md#launching-runspace). Published outputs embed .NET and PowerShell; require a passing **Published payload** CI job rather than treating compilation as deployment validation.
 
 ## Documentation
 

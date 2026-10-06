@@ -12,11 +12,53 @@ On macOS/Linux, use this project path after restoring and building the solution:
 dotnet run --project src/Runspace.Desktop/Runspace.Desktop.csproj
 ```
 
-Linux requires a graphical session and Avalonia's native dependencies, including X11/XWayland and fontconfig.
+Linux requires a graphical session and native dependencies; see [Linux prerequisites](#linux-prerequisites). The default backend uses X11 or XWayland, not native Wayland.
 
-The [Build and test workflow](https://github.com/adamdriscoll/runspace/actions/workflows/build.yml) produces self-contained outputs for `win-x64`, `linux-x64`, and `osx-arm64`. Download the matching `runspace-<rid>` artifact from a successful run and extract the entire payload before launching it. These are build artifacts, not installers or a claim of clean-machine certification for every OS version.
+The [Build and test workflow](https://github.com/adamdriscoll/runspace/actions/workflows/build.yml) produces self-contained outputs for `win-x64`, `linux-x64`, and `osx-arm64`. Download the matching `runspace-<rid>` artifact from a run whose **Published payload** job also passed. Extract the entire payload, including `runtimes` and `ref`; do not copy only the executable. These are build artifacts, not installers.
+
+Run `.\Runspace.Desktop.exe` on Windows. On macOS/Linux, restore the executable bit if the artifact download removed it, then launch `./Runspace.Desktop`:
+
+```sh
+chmod +x ./Runspace.Desktop
+./Runspace.Desktop
+```
+
+A separate .NET runtime, .NET SDK, or PowerShell installation is not required for these self-contained outputs.
 
 For build, test, debugger, and publish instructions, see [Contributing](../CONTRIBUTING.md).
+
+## Supported platform matrix
+
+Support is limited to the OS/architecture and validation scope below, not every OS supported separately by .NET, PowerShell, or Avalonia. [Published-build validation](publish-validation.md) records the commands, exact versions, results, and remaining qualifications.
+
+| OS / architecture | Artifact | Validation and support scope |
+| --- | --- | --- |
+| Ubuntu 24.04 LTS / x64 | `linux-x64` | Verified on clean Ubuntu 24.04.5 with X11/Xvfb, no installed PowerShell/.NET, and no checkout. Supported baseline with the native prerequisites below; a physical desktop/XWayland session remains a separate qualification. |
+| Windows 11 / x64 | `win-x64` | Verified on build 26200 with the published payload relocated, empty executable/module search paths, and a temporary home. Provisional desktop baseline; this host was not a pristine Windows installation. Other Windows 11 builds are not yet verified. |
+| macOS 15 / ARM64 | `osx-arm64` | Verified on macOS 15.7.9 ARM64 using a relocated payload, temporary home, empty application search paths, and the real native desktop backend. Provisional desktop baseline; hosted-runner isolation is not pristine-install/GPU certification. Other macOS 15 updates are not yet verified. |
+| Windows Server 2025 / x64 | `win-x64` | Verified on hosted build 26100 with isolated application search paths. Validation-only coverage, not a desktop-product support commitment. |
+
+Other versions and architectures are **unverified and outside the current support matrix**, including Windows ARM64/x86, macOS Intel or macOS 26, other Linux distributions/architectures, and musl/Alpine. Native Wayland, headless operation without a display server, Windows PowerShell 5.1 hosting, trimming, Native AOT, and single-file publication are not supported deployment modes.
+
+### Linux prerequisites
+
+On Ubuntu 24.04, provision the OS runtime/graphics packages before launching:
+
+```sh
+sudo apt-get update
+sudo apt-get install --no-install-recommends \
+  libicu74 libssl3t64 zlib1g libgcc-s1 libstdc++6 libgssapi-krb5-2 \
+  libx11-6 libice6 libsm6 libfontconfig1 libxext6 libxrandr2 libxi6 libxcursor1 \
+  libglib2.0-0t64 fonts-dejavu-core
+```
+
+Use a working X11 desktop or an XWayland-enabled Wayland desktop, with `DISPLAY` and any required `XAUTHORITY` set. Self-contained .NET publication does not bundle the display server, system fonts, ICU, OpenSSL, or all OS libraries. The automated clean-container check also installs `xvfb`, `xauth`, and `python3` for its harness; these are not application requirements.
+
+### Embedded PowerShell limitations
+
+The SDK-only host is not the `pwsh` command-line distribution. **`Start-Job` is not supported** because no `pwsh` executable is shipped beside the engine; installing one elsewhere does not turn this into a validated capability. PowerShell profiles remain disabled.
+
+Management, Utility, and Security module manifests and implementations ship with the payload. Windows also includes the CIM and Diagnostics SDK assets. Additional administration modules, remoting, Windows PowerShell compatibility, and their external dependencies are not supplied or certified by this validation. A missing bundled dependency produces an explicit diagnostic directing you to extract the complete matching artifact again; changing `PSModulePath` is not a repair.
 
 ## Built-in views
 

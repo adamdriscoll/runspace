@@ -278,7 +278,7 @@ public sealed class PowerShellSession : IConsoleSession
         finally { queue.Release(); }
     }
 
-    // Only the test assembly can execute arbitrary scripts, for real stream and stop coverage.
+    // Internal scripts are limited to runtime validation and the test assembly.
     internal Task<ConsoleResult> InvokeForTestingAsync(string script, CancellationToken cancellationToken = default) =>
         RunAsync([new("Value", "Value")], "Internal runtime test", ResourceKind.Overview, cancellationToken, diagnostics =>
         {
@@ -344,6 +344,7 @@ public sealed class PowerShellSession : IConsoleSession
     private void EnsureRunspace()
     {
         if (runspace is not null) return;
+        PowerShellPayload.Validate(AppContext.BaseDirectory, OperatingSystem.IsWindows());
         var state = InitialSessionState.CreateDefault2();
         if (OperatingSystem.IsWindows())
             state.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.RemoteSigned;

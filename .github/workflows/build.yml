@@ -48,3 +48,47 @@ jobs:
           name: tests-${{ matrix.rid }}
           path: "**/TestResults/*.trx"
           if-no-files-found: ignore
+
+  validate-publish:
+    name: Published payload / ${{ matrix.rid }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: runspace-${{ matrix.rid }}
+          path: ${{ runner.temp }}/runspace-payload
+      - name: Validate isolated Windows/macOS payload
+        if: runner.os != 'Linux'
+        shell: pwsh
+        run: ./scripts/Validate-Publish.ps1 -Payload "${{ runner.temp }}/runspace-payload" -Results "${{ runner.temp }}/publish-results"
+      - name: Validate clean Ubuntu payload with X11
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/publish-results"
+          docker build --quiet --tag runspace-publish-validation --file scripts/publish-validation.Dockerfile scripts
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            --mount "type=bind,source=${{ runner.temp }}/runspace-payload,target=/payload,readonly" \
+            --mount "type=bind,source=${{ runner.temp }}/publish-results,target=/results" \
+            runspace-publish-validation
+      - name: Upload published validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-validation-${{ matrix.rid }}
+          path: ${{ runner.temp }}/publish-results
+          if-no-files-found: error

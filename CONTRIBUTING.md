@@ -61,7 +61,15 @@ dotnet test Runspace.slnx --configuration Release --no-build
 dotnet publish .\src\Runspace.Desktop\Runspace.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true --output .\artifacts\publish
 ```
 
-For another platform, use its project-path syntax and runtime identifier. [GitHub Actions](.github/workflows/build.yml) builds/tests on Windows, Ubuntu 24.04, and macOS, then publishes `win-x64`, `linux-x64`, and `osx-arm64` artifacts. These outputs are not installers; clean-machine support must be verified separately.
+For another platform, use its project-path syntax and runtime identifier. [GitHub Actions](.github/workflows/build.yml) builds/tests on Windows, Ubuntu 24.04, and macOS, then publishes `win-x64`, `linux-x64`, and `osx-arm64` artifacts. Separate **Published payload** jobs download and launch those artifacts outside the checkout, including deliberately missing manifest, assembly, and native-library probes. Linux runs in a clean Ubuntu container with Xvfb and no installed PowerShell/.NET; Windows/macOS use isolated application search paths on hosted runners.
+
+Run the Windows published gate locally after publishing:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Validate-Publish.ps1 -Payload .\artifacts\publish -Results .\artifacts\validation-windows
+```
+
+See [published-build validation](docs/publish-validation.md) for exact probes, results, the clean Linux recipe, and hosted-runner limitations. A build/test success does not replace this gate, and passing a hosted-runner gate does not certify every pristine OS installation or GPU/display configuration. These outputs are not installers.
 
 ## Submit a pull request
 

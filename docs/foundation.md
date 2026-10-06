@@ -55,6 +55,6 @@ Mutating actions bind parameters and act on fixed selected handles. UI confirmat
 
 The desktop project has separate Debug/Release lock files because its development-only inspection bridge is excluded from Release. The supported publish runtime identifiers are declared together so locked restores remain valid for the three CI outputs.
 
-GitHub Actions uses a three-OS matrix, runs tests, publishes self-contained runtime-specific outputs, and uploads build/test artifacts. Configuring the workflow is not evidence that it has already run remotely.
+GitHub Actions uses a three-OS matrix, runs tests, publishes self-contained runtime-specific outputs, and uploads build/test artifacts. Separate published-payload jobs launch downloaded artifacts, exercise the real embedded engine/desktop, and retain positive and missing-dependency reports. Linux validation uses a clean Ubuntu/Xvfb container; hosted Windows/macOS checks isolate the application's search paths but are not pristine-machine certification. See [recorded deployment evidence](publish-validation.md), not workflow configuration alone, for verified results.
 
 See [Contributing](../CONTRIBUTING.md) for development commands and the [usage guide](usage.md) for console interactions.
