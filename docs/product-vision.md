@@ -1,14 +1,14 @@
 # Product vision
 
-Status: proposed product foundation. User-required technologies and product direction are identified in the [README](../README.md); this document is not an implementation completion report.
+Status: product direction and design reference, not an implementation completion report. See the [implemented foundation](foundation.md) for current behavior and [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24) for planned work.
 
 ## Product promise
 
 Runspace turns PowerShell's object model into a navigable administration workbench. An administrator should be able to discover a resource, understand the returned objects, act on a deliberate selection, and inspect the command behind that action.
 
-The goal is to recreate **PowerGUI Admin Console's mental model and desktop character**, not merely embed a terminal in an Avalonia window. Its separate script editor is not the starting product.
+PowerGUI is the inspiration for the tree/object/action workflow. Runspace is a native administration console, not a terminal wrapper.
 
-The reference supports a left navigation tree, center object results, right contextual actions, document-style result/history/chart views, and a diagnostic log. The result grid retains objects and supports selection-dependent operations. [Reference: PG-04 through PG-13](research/powergui-3.8.md#source-ledger)
+The console uses a left navigation tree, center object results, right contextual actions, history, and diagnostics. The result grid retains objects and supports selection-dependent operations.
 
 ## Who it is for
 
@@ -20,22 +20,21 @@ The reference supports a left navigation tree, center object results, right cont
 
 The first release should optimize for a single administrator working locally. Fleet management, multi-user authorization, remote orchestration, and a hosted web product are different problems.
 
-## Preserve, modernize, defer
+## Design priorities
 
-| Preserve | Modernize | Defer |
-| --- | --- | --- |
-| Tree -> objects -> selection -> actions | Avalonia desktop UI across Windows, macOS, Linux | Full script IDE/debugger |
-| Dense, practical, multi-pane layout | High-DPI rendering, keyboard access, screen-reader semantics | Marketplace and automatic kit updates |
-| PowerShell-backed queries and operations | PowerShell 7 modules rather than old snap-in assumptions | Legacy `.powerpack` importer |
-| Named reusable administration collections | Versioned Console Kits with explicit compatibility/trust | Remoting/session-farm management |
-| Visible command history and diagnostics | Asynchronous execution, cancellation, structured stream display | Chart designer and snapshot comparison |
-| Saved view/layout preferences | Per-user storage and honest platform capabilities | Native third-party UI extensions |
+| Principle | Direction |
+| --- | --- |
+| Tree -> objects -> selection -> actions | Native Avalonia desktop UI across Windows, macOS, Linux |
+| Dense, practical, multi-pane layout | High-DPI rendering, keyboard access, screen-reader semantics |
+| PowerShell-backed queries and operations | PowerShell 7 modules rather than old snap-in assumptions |
+| Visible command history and diagnostics | Asynchronous execution, cancellation, structured stream display |
+| Saved view/layout preferences | Per-user storage and honest platform capabilities |
 
-Defer does not mean reject. The original distribution has charts, snapshots, an editor, update machinery, and numerous domain packs; reproducing all of those at once would delay validating the defining experience.
+Feature scope, sequencing, and acceptance gates belong in the issue tracker rather than this design reference.
 
-## First useful console
+## Built-in local administration
 
-Provide an original built-in **Local System** Console Kit with:
+The built-in **Local System** views establish the administration workflow without requiring a kit loader:
 
 - **Processes:** useful default columns, sorting, filtering, properties, and an explicitly confirmed process-stop action using disposable test processes during development.
 - **Provider Drives:** enumerate drives from the active session; add/remove eligible drives; browse navigation-capable providers without assuming every drive is a directory tree.
@@ -43,17 +42,17 @@ Provide an original built-in **Local System** Console Kit with:
 
 Provider drives are session-scoped PowerShell resources, not a list of physical disks. Built-in and newly added drives should appear without restarting the application. Unsupported provider operations should have clear explanations.
 
-Windows-only views such as Services, Registry, Event Logs, and WMI/CIM administration can follow as capability-gated additions. Active Directory, Hyper-V, Exchange, and VMware experiences are later independent kits, not prerequisites for portability.
+The implemented console also includes capability-gated Windows views such as Services, Registry, Event Logs, and WMI/CIM administration. See the [usage guide](usage.md#built-in-views) for the current view list.
 
 ## Essential workflows
 
-**Discover and inspect:** enable a kit, expand a resource group, run a query, inspect typed rows and full object properties, change columns, and follow a related view.
+**Discover and inspect:** expand a resource group, run a query, inspect typed rows and full object properties, change columns, and follow a related view.
 
 **Act deliberately:** choose one or several objects, see applicable actions, supply typed parameters, review a meaningful confirmation if needed, execute, and observe the declared refresh or result transition.
 
 **Understand execution:** see whether the operation is queued, running, prompting, stopping, completed, completed with errors, failed, or cancelled. Inspect progress, diagnostics, and the PowerShell representation.
 
-**Customize and share:** persist a workspace's layout and view choices; later, author an original kit and export it without credentials or private session data.
+**Customize:** preserve deliberate layout and view preferences without persisting credentials or private live session data. The current implementation saves window/pane sizes only.
 
 ## Fidelity priorities
 
@@ -75,8 +74,4 @@ Do not claim that a cross-platform shell makes every administration domain cross
 
 Do not claim `.powerpack` compatibility or complete PowerGUI parity in the first release.
 
-## Definition of the first milestone
-
-A user can open Runspace on all three target operating systems, use the same tree/grid/action workflow to inspect processes and provider drives, perform a safe contextual operation, cancel a cooperative query, and understand a failed query without using a separate terminal.
-
-Detailed acceptance gates are in the [roadmap](roadmap.md). Visual targets are in the [console experience](ux/admin-console.md); compatibility constraints are in the [platform research](research/modern-platform.md).
+Visual targets are in the [console experience](ux/admin-console.md); compatibility constraints are in the [platform research](research/modern-platform.md). Delivery status and acceptance work live in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).

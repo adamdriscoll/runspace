@@ -1,0 +1,76 @@
+# Contributing to Runspace
+
+Use [GitHub issues](https://github.com/adamdriscoll/runspace/issues) to report bugs and propose changes. The [roadmap tracker](https://github.com/adamdriscoll/runspace/issues/24) groups remaining work, dependencies, and acceptance gates; keep task status there rather than adding Markdown roadmaps.
+
+The current implementation is the built-in administration console. Discuss changes to public contracts, persisted formats, dependencies, or product scope before implementing them.
+
+## Development setup
+
+Install the **.NET 10 SDK** matching `global.json` (10.0.401, with patch roll-forward). NuGet lock files pin the dependency graph, and `NuGet.Config` defines the package source. The embedded engine does not require a separate PowerShell installation.
+
+From the repository root in PowerShell:
+
+```powershell
+dotnet restore Runspace.slnx --locked-mode
+dotnet build Runspace.slnx
+dotnet run --project .\src\Runspace.Desktop\Runspace.Desktop.csproj
+```
+
+For macOS/Linux paths and graphical dependencies, see [Launching Runspace](docs/usage.md#launching-runspace).
+
+### VS Code
+
+Open the repository folder, install the recommended C# extension, and press **F5** with **Runspace: launch console** selected. **Ctrl+Shift+B** builds the solution. The `launch`, `test`, and `publish` tasks are also available through **Terminal -> Run Task**.
+
+## Project structure
+
+| Project | Responsibility |
+| --- | --- |
+| `src\Runspace.Core` | Resource/action definitions, cached display cells, typed filtering and sorting |
+| `src\Runspace.PowerShell` | Local session, serialized execution, live object ownership, provider/CIM operations, streams and cancellation |
+| `src\Runspace.Desktop` | Avalonia shell, dialogs, history, diagnostics, clipboard/CSV, and layout |
+| `tests\Runspace.Tests` | Core behavior and real embedded-runtime tests |
+| `tests\Runspace.Desktop.Tests` | Headless Avalonia interaction tests through a fixture session |
+
+Keep PowerShell-specific types out of Core and desktop bindings, and Avalonia controls out of the execution adapter. Use `IConsoleSession` for deterministic desktop fixtures and the real runtime for provider/execution compatibility tests.
+
+## Test changes
+
+Run the smallest relevant tests while developing, then the solution suite before submitting:
+
+```powershell
+dotnet test .\tests\Runspace.Tests\Runspace.Tests.csproj --filter FullyQualifiedName~ResultViewTests
+dotnet test .\tests\Runspace.Desktop.Tests\Runspace.Desktop.Tests.csproj
+dotnet test Runspace.slnx
+```
+
+Add regression coverage for behavior changes. Use original fixture objects, uniquely named temporary drives/directories, and disposable child processes. Tests must never perform destructive actions against arbitrary machine resources or require production credentials.
+
+Nullable analysis and warnings-as-errors are enabled in `Directory.Build.props`. Preserve typed values, fixed object selection, literal parameter binding, and explicit failure/partial/cancelled states. Never evaluate arbitrary object getters on the UI thread, hide execution failures as empty successes, or store secrets in history or settings.
+
+## Publish and CI
+
+The desktop project has separate Debug and Release lock files because its inspection bridge is development-only. Restore the configuration you intend to build.
+
+To follow the Release CI sequence and publish a self-contained Windows output:
+
+```powershell
+dotnet restore Runspace.slnx --locked-mode --property:Configuration=Release
+dotnet build Runspace.slnx --configuration Release --no-restore
+dotnet test Runspace.slnx --configuration Release --no-build
+dotnet publish .\src\Runspace.Desktop\Runspace.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true --output .\artifacts\publish
+```
+
+For another platform, use its project-path syntax and runtime identifier. [GitHub Actions](.github/workflows/build.yml) builds/tests on Windows, Ubuntu 24.04, and macOS, then publishes `win-x64`, `linux-x64`, and `osx-arm64` artifacts. These outputs are not installers; clean-machine support must be verified separately.
+
+## Submit a pull request
+
+Keep changes focused and link the issue they address. Explain the behavior change, how it was checked, and any platform or compatibility limitations. Update directly affected documentation, and distinguish implemented behavior from proposals.
+
+Do not commit credentials, private result data, machine-specific reference captures, or proprietary binaries/scripts/artwork. Do not automatically elevate, install modules, load profiles, activate untrusted code, or reconnect sessions.
+
+## Design references
+
+Start with the [implemented foundation](docs/foundation.md) and [domain glossary](CONTEXT.md). The [product direction](docs/product-vision.md), [architecture alternatives](docs/architecture.md), [console interaction specification](docs/ux/admin-console.md), and [kit contract proposal](docs/console-kits.md) provide design context, not a second backlog.
+
+The [platform research](docs/research/modern-platform.md) records runtime constraints. Detailed [reference research](docs/research/powergui-3.8.md) is kept separate from user-facing guidance; historical assets are not product dependencies.
