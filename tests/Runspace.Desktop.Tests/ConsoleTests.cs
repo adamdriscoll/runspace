@@ -315,8 +315,12 @@ public sealed partial class ConsoleTests
             Assert.True(nested.IsLazy);
             Assert.Contains(result.Id, session.Released);
             container.IsExpanded = false;
+            Assert.True(drive.IsLazy);
+            Assert.Equal("Expand to load...", Assert.Single(drive.Children).Name);
             container.IsExpanded = true;
-            Assert.Single(session.QueryNodes, node => node == root);
+            await UntilAsync(() => !drive.IsLoading);
+            Assert.Equal(2, session.QueryNodes.Count(node => node == root));
+            nested = Assert.Single(drive.Children);
             window.UpdateLayout();
             var childContainer = window.FindControl<TreeView>("NavigationTree")!.GetVisualDescendants().OfType<TreeViewItem>()
                 .Single(item => ReferenceEquals(item.DataContext, nested));

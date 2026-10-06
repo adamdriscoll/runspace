@@ -28,6 +28,9 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<ConsoleNode> _navigationHistory = [];
     private readonly Queue<string> _history = new();
+    private readonly DiagnosticBuffer _diagnosticBuffer = new();
+    private bool _historyEvicted;
+    private int _navigationEvictions;
     private IConsoleSession? _session;
     private ConsoleResult? _result;
     private ConsoleNode? _currentNode;
@@ -46,6 +49,7 @@ public partial class MainWindow : Window
     private bool _readyToClose;
     private bool _changingRows;
     internal bool IsSessionReady { get; private set; }
+    internal int ResultDisplayCount { get; private set; }
 
     public MainWindow() : this(null, true) { }
 
@@ -58,6 +62,7 @@ public partial class MainWindow : Window
         DataContext = _model;
         BuildNavigation();
         NavigationTree.AddHandler(TreeViewItem.ExpandedEvent, Expanded);
+        NavigationTree.AddHandler(TreeViewItem.CollapsedEvent, Collapsed);
         ResultsGrid.AddHandler(KeyDownEvent, ResultKeyDown, RoutingStrategies.Tunnel);
         ResultsGrid.AddHandler(KeyUpEvent, ResultKeyUp, RoutingStrategies.Tunnel);
         Opened += async (_, _) => await SafeAsync(InitializeAsync);
@@ -172,9 +177,12 @@ public partial class MainWindow : Window
         var nodes = await Session.GetDriveNodesAsync(_lifetime.Token);
         if (_drivesRoot is null) return;
         _drivesRoot.Children.Clear();
-        foreach (var node in nodes)
+        var capacity = NavigationCapacity();
+        foreach (var node in nodes.Take(capacity))
             _drivesRoot.Children.Add(new(node, true));
         _drivesRoot.IsLazy = false;
+        if (nodes.Count > capacity)
+            NavigationLimit(_drivesRoot);
     }
 
     private async void NavigationChanged(object? sender, SelectionChangedEventArgs e)
@@ -185,7 +193,7 @@ public partial class MainWindow : Window
 
     private async void Expanded(object? sender, RoutedEventArgs e)
     {
-        if (e.Source is not TreeViewItem { DataContext: NavigationItem { IsLazy: true, IsLoading: false } item })
+        if (e.Source is not TreeViewItem { DataContext: NavigationItem { IsLazy: true, IsLoading: false } item } container)
             return;
         await SafeAsync(async () =>
         {
@@ -204,13 +212,17 @@ public partial class MainWindow : Window
                 try
                 {
                     AppendDiagnostics(result);
-                    if (_closing) return;
+                    if (_closing || !container.IsExpanded) return;
                     if (result.Outcome is InvocationOutcome.Failed or InvocationOutcome.Cancelled)
                         throw new InvalidOperationException(result.Diagnostics.LastOrDefault()?.Message ?? "Unable to load this resource. Collapse and expand to retry.");
                     item.Children.Clear();
-                    foreach (var row in result.Rows.Where(row => row.RelatedNode is not null))
+                    var candidates = result.Rows.Where(row => row.RelatedNode is not null).ToArray();
+                    var capacity = NavigationCapacity();
+                    foreach (var row in candidates.Take(capacity))
                         item.Children.Add(new(row.RelatedNode!, true));
-                    item.IsLazy = result.Outcome != InvocationOutcome.Completed;
+                    var limited = candidates.Length > capacity || result.RetentionNotice is not null;
+                    if (limited) NavigationLimit(item);
+                    item.IsLazy = result.Outcome != InvocationOutcome.Completed || limited;
                     if (item.IsLazy)
                     {
                         if (item.Children.Count == 0)
@@ -239,6 +251,46 @@ public partial class MainWindow : Window
         });
     }
 
+    private static int NavigationCount(IEnumerable<NavigationItem> items) =>
+        items.Sum(item => 1 + NavigationCount(item.Children.Where(child => child.Node.Id != "loading")));
+
+    private int NavigationCapacity() => Math.Min(RetentionPolicy.NavigationChildren,
+        Math.Max(0, RetentionPolicy.NavigationNodes - NavigationCount(_model.Roots)));
+
+    private void NavigationLimit(NavigationItem item)
+    {
+        item.Children.Add(new(new("loading", "Navigation limited; use Location or Refresh", ResourceKind.Overview, string.Empty)));
+        _diagnosticBuffer.Add(new(DateTimeOffset.Now, "Retention",
+            $"Navigation for {item.Name} is limited to {RetentionPolicy.NavigationChildren} children / " +
+            $"{RetentionPolicy.NavigationNodes:N0} loaded nodes. Collapse a branch to unload it; use a literal Location " +
+            "to browse omitted paths or export the retained result table."));
+        UpdateDiagnosticsText();
+        DiagnosticsPane.IsVisible = true;
+    }
+
+    private static void Collapsed(object? sender, RoutedEventArgs e)
+    {
+        if (e.Source is not TreeViewItem { DataContext: NavigationItem item } ||
+            item.Node.Kind is not (ResourceKind.ProviderPath or ResourceKind.Registry)) return;
+        item.Children.Clear();
+        item.Children.Add(new(new("loading", "Expand to load...", ResourceKind.Overview, string.Empty)));
+        item.IsLazy = true;
+    }
+
+    private void AddNavigationRoute(ConsoleNode node)
+    {
+        if (_historyPosition < _navigationHistory.Count - 1)
+            _navigationHistory.RemoveRange(_historyPosition + 1, _navigationHistory.Count - _historyPosition - 1);
+        if (_navigationHistory.Count == 0 || _navigationHistory[^1] != node)
+            _navigationHistory.Add(node);
+        if (_navigationHistory.Count > RetentionPolicy.NavigationRoutes)
+        {
+            _navigationHistory.RemoveAt(0);
+            _navigationEvictions++;
+        }
+        _historyPosition = _navigationHistory.Count - 1;
+    }
+
     private async Task NavigateAsync(ConsoleNode node, bool addHistory = true)
     {
         if (_closing) return;
@@ -257,13 +309,7 @@ public partial class MainWindow : Window
         Breadcrumb.IsVisible = !LocationBox.IsVisible;
         DocumentTabs.SelectedIndex = 0;
         if (addHistory)
-        {
-            if (_historyPosition < _navigationHistory.Count - 1)
-                _navigationHistory.RemoveRange(_historyPosition + 1, _navigationHistory.Count - _historyPosition - 1);
-            if (_navigationHistory.Count == 0 || _navigationHistory[^1] != node)
-                _navigationHistory.Add(node);
-            _historyPosition = _navigationHistory.Count - 1;
-        }
+            AddNavigationRoute(node);
         UpdateNavigationButtons();
         _model.IsBusy = true;
         _model.Status = $"Loading {node.Name}; query/display properties pending...";
@@ -301,9 +347,11 @@ public partial class MainWindow : Window
             };
             if (result.Outcome is InvocationOutcome.Failed or InvocationOutcome.CompletedWithErrors)
                 message += ErrorSummary(result);
+            if (result.RetentionNotice is { } notice) message += "\n" + notice;
             ResultMessage.IsVisible = message.Length > 0;
             ResultMessageText.Text = message;
-            _model.Status = $"{result.Outcome} - {node.Name} ({result.Duration.TotalSeconds:N2} s)";
+            _model.Status = $"{result.Outcome} - {node.Name} ({result.Duration.TotalSeconds:N2} s)" +
+                (_navigationEvictions == 0 ? string.Empty : $" | {_navigationEvictions} older Back routes evicted; requery using Location.");
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -360,6 +408,7 @@ public partial class MainWindow : Window
 
     private void Display(IReadOnlyList<ConsoleColumn> columns, IReadOnlyList<ConsoleRow> rows)
     {
+        ResultDisplayCount++;
         _changingRows = true;
         try
         {
@@ -607,10 +656,7 @@ public partial class MainWindow : Window
                                 var kind = action.Id == ConsoleActionId.ProcessModules ? ResourceKind.ProcessModules : ResourceKind.ProcessThreads;
                                 var related = new ConsoleNode($"{kind}:{rows[0].Handle}", $"{rows[0].Label} - {action.Name}", kind,
                                     action.Description, rows[0].Cells.GetValueOrDefault("Id")?.Value?.ToString());
-                                if (_historyPosition < _navigationHistory.Count - 1)
-                                    _navigationHistory.RemoveRange(_historyPosition + 1, _navigationHistory.Count - _historyPosition - 1);
-                                _navigationHistory.Add(related);
-                                _historyPosition = _navigationHistory.Count - 1;
+                                AddNavigationRoute(related);
                                 _currentNode = related;
                                 _model.Title = related.Name;
                                 _model.Description = related.Description;
@@ -626,12 +672,13 @@ public partial class MainWindow : Window
                             break;
                     }
                     _model.Status = $"{action.Name}: {result.Outcome}";
-                    if (result.Outcome != InvocationOutcome.Completed || result.OutputSuppressed)
+                    if (result.Outcome != InvocationOutcome.Completed || result.OutputSuppressed || result.RetentionNotice is not null)
                     {
                         ResultMessage.IsVisible = true;
                         ResultMessageText.Text = result.OutputSuppressed
                             ? $"{action.Name}: {result.Outcome}. Output withheld because this invocation used credentials/secure input; see Diagnostics."
                             : $"{action.Name}: {result.Outcome}. Partial operations/results may remain; see Diagnostics." + ErrorSummary(result);
+                        if (result.RetentionNotice is { } notice) ResultMessageText.Text += "\n" + notice;
                     }
                 }
             }
@@ -694,19 +741,27 @@ public partial class MainWindow : Window
     private void RecordInvocation(string name, ConsoleResult result)
     {
         AppendDiagnostics(result);
-        _history.Enqueue($"# {DateTimeOffset.Now:g} | {name} | {result.Outcome} | {result.Duration.TotalSeconds:N2}s\n{result.Script}\n");
-        var trimmed = false;
-        while (_history.Count > 200) { _history.Dequeue(); trimmed = true; }
-        _model.History = (trimmed ? "# History retains the latest 200 invocations.\n\n" : string.Empty) + string.Join("\n", _history.Reverse());
+        _history.Enqueue($"# {DateTimeOffset.Now:g} | {name} | {result.Outcome} | {result.Duration.TotalSeconds:N2}s\n" +
+            $"{RetentionPolicy.BoundText(result.Script)}\n{result.RetentionNotice}\n");
+        while (_history.Count > RetentionPolicy.HistoryEntries) { _history.Dequeue(); _historyEvicted = true; }
+        _model.History = (_historyEvicted ? $"# History retains the latest {RetentionPolicy.HistoryEntries} invocations; older descriptions evicted. Save/copy before leaving.\n\n" : string.Empty) +
+            string.Join("\n", _history.Reverse());
     }
 
     private void AppendDiagnostics(ConsoleResult result)
     {
         foreach (var record in result.Diagnostics)
-            _model.Diagnostics += $"{record.Timestamp:T} [{record.Stream}] {record.Message}\n";
-        if (result.Outcome is not InvocationOutcome.Completed || result.OutputSuppressed)
+            _diagnosticBuffer.Add(record);
+        if (result.RetentionNotice is { } notice)
+            _diagnosticBuffer.Add(new(DateTimeOffset.Now, "Retention", notice));
+        UpdateDiagnosticsText();
+        if (result.Outcome is not InvocationOutcome.Completed || result.OutputSuppressed ||
+            result.RetentionNotice is not null || result.Diagnostics.Any(record => record.Stream == "Retention"))
             DiagnosticsPane.IsVisible = true;
     }
+
+    private void UpdateDiagnosticsText() => _model.Diagnostics = string.Join("\n",
+        _diagnosticBuffer.Snapshot().Select(record => $"{record.Timestamp:T} [{record.Stream}] {record.Message}"));
 
     private static string ErrorSummary(ConsoleResult result)
     {
@@ -828,6 +883,8 @@ public partial class MainWindow : Window
     {
         BackButton.IsEnabled = _historyPosition > 0;
         ForwardButton.IsEnabled = _historyPosition >= 0 && _historyPosition < _navigationHistory.Count - 1;
+        ToolTip.SetTip(BackButton, $"Back requeries; no related-result objects are cached. Latest {RetentionPolicy.NavigationRoutes} routes retained." +
+            (_navigationEvictions == 0 ? string.Empty : $" {_navigationEvictions} older routes evicted; use Location to requery."));
     }
 
     private Task MoveHistoryAsync(int offset)
@@ -861,7 +918,8 @@ public partial class MainWindow : Window
     private void ReportError(Exception exception, bool updateView = true)
     {
         Trace.TraceError(exception.ToString());
-        _model.Diagnostics += $"{DateTimeOffset.Now:T} [Console error] {exception}\n";
+        _diagnosticBuffer.Add(new(DateTimeOffset.Now, "Error", exception.ToString()));
+        UpdateDiagnosticsText();
         DiagnosticsPane.IsVisible = true;
         if (!updateView) return;
         _navigationWarning = null;

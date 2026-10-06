@@ -154,10 +154,14 @@ public sealed class SessionLifetimeTests
                 Assert.DoesNotContain(await foreignSession.GetDriveNodesAsync().WaitAsync(Timeout), node => node.Path == $"{name}:\\");
                 creationGate.Release.Set();
                 await inspection.WaitAsync(Timeout);
-                Assert.Equal(InvocationOutcome.Completed, (await add.WaitAsync(Timeout)).Outcome);
+                var added = await add.WaitAsync(Timeout);
+                Assert.Equal(InvocationOutcome.Completed, added.Outcome);
+                session.ReleaseResult(added.Id);
                 var failedAdd = await duplicate.WaitAsync(Timeout);
                 Assert.Equal(InvocationOutcome.Failed, failedAdd.Outcome);
                 Assert.Contains(failedAdd.Diagnostics, record => record.Stream == "Error" && record.Message.Contains(name));
+                session.ReleaseResult(drives.Id);
+                session.ReleaseResult(objects.Id);
                 drives = await query.WaitAsync(Timeout);
                 Assert.Equal(InvocationOutcome.Completed, drives.Outcome);
                 Assert.Equal(root, Assert.Single(drives.Rows, row => row.Cells["Name"].Display == name).Cells["Root"].Value);

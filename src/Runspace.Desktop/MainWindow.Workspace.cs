@@ -167,7 +167,9 @@ public partial class MainWindow
             if (ResultsGrid.Columns.Count > 0 && !ResultsGrid.Columns.Any(column => column.IsVisible))
             {
                 ResultsGrid.Columns[0].IsVisible = true;
-                _model.Diagnostics += "Saved visible columns are unavailable; the first available column is shown. Use Columns to review preferences.\n";
+                _diagnosticBuffer.Add(new(DateTimeOffset.Now, "Workspace",
+                    "Saved visible columns are unavailable; the first available column is shown. Use Columns to review preferences."));
+                UpdateDiagnosticsText();
                 DiagnosticsPane.IsVisible = true;
             }
             FilterBox.Text = preference.Filter;
@@ -280,7 +282,8 @@ public partial class MainWindow
                 "Preserve the original file as a uniquely named .bak, then save default preferences? No code will run.",
                 acceptLabel: "Back up and reset")) return;
             var backup = _workspaceStore!.BackUpDamagedFile();
-            _model.Diagnostics += $"Original workspace preserved at {backup}\n";
+            _diagnosticBuffer.Add(new(DateTimeOffset.Now, "Workspace", $"Original workspace preserved at {backup}"));
+            UpdateDiagnosticsText();
             _workspaceRecovery = null;
             _workspace = new();
             _displayedReference = null;

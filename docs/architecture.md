@@ -115,7 +115,7 @@ Cached display values and property descriptors can cross into the UI. Property a
 
 Avoid holding a runtime lock while posting events or waiting for a prompt. Convert safe scalar values for display; bound recursion when inspecting arrays/nested properties and detect cycles.
 
-Release object graphs when a result view closes, is replaced, or is evicted. History stores a redacted description, not permanent references to every returned object. Related-view back navigation needs an explicit retention policy; the maximum retained results and behavior on eviction are implementation decision gates.
+Release object graphs when a result view closes, is replaced, or is evicted. History stores a redacted description, not permanent references to every returned object. The built-in implementation now has a [measured retention policy](result-performance.md): one current result, no related-result cache, 25,000 rows per invocation, four adapter result slots, bounded streams/navigation and the existing 200-entry history. Back navigation requeries; overflow/loss is visible and releases handles. These are cardinality limits, not a hard process-memory ceiling.
 
 ### Parameters and action input
 
@@ -182,6 +182,6 @@ Desktop tests verify the visible tree/grid/action contract, keyboard focus, disp
 | Reflection-heavy runtime vs. Native AOT | Ordinary .NET publish | PowerShell/module dynamism needs proof before trimming/AOT is considered |
 | TableView vs. legacy DataGrid/commercial TreeDataGrid | Core TableView spike | Validate the complete grid contract and licenses before choosing an adapter |
 | SDK-only vs. redistributable runtime payload | Validate a publish spike | A NuGet reference alone does not prove required modules/native assets are shipped |
-| Unbounded results vs. retention limits | Measure representative loads | Set explicit result/stream/history limits and visible truncation policy before production |
+| Unbounded results vs. retention limits | [Release reference workload and bounded policy](result-performance.md) | Implemented built-in limits; arbitrary graphs, native interruption and additional native platform/DPI performance need separate qualification |
 
 Record durable decisions as ADRs only after their trade-offs are actually agreed. These proposals intentionally remain easy to revise.
