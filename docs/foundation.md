@@ -53,6 +53,27 @@ The embedded custom host binds each parameter, choice, credential, and secure-in
 
 Interactive history is non-replayable. Secure-input invocations discard returned object graphs and redact command/diagnostic text rather than attempting unreliable secret detection. The invocation owns and disposes accepted secure values. This does not prevent arbitrary scripts from copying values into session state or sending them elsewhere.
 
+### Result retention and pending inspection
+
+The desktop retains **one current live result set**, not a cache of previous result sets. While a replacement query is pending, the previous cached rows remain visible with actions disabled and an explicit query/display-property pending message. The old result is released when the replacement is accepted, when an overview evicts it, or when the window closes. A late result from a superseded navigation/action is released without replacing the current rows, actions, prompts, result banner, or status. Its redacted invocation description/outcome and diagnostics can still be recorded.
+
+| Action result policy | Live-object retention |
+| --- | --- |
+| Retain | Keep the current result; release the action output after recording its outcome. |
+| Refresh | Requery the current node, release the replaced result, and release the action output. Keep the action's partial/failed/cancelled outcome visible unless a newer navigation supersedes the refresh. |
+| Replace | Release the current result and retain the action output in its place. |
+| Related | Like Replace, but retain a navigation route back, not the source objects. Back/Forward requery the node and obtain fresh handles; leaving the related view releases its result. |
+
+Navigation history contains node definitions; invocation history contains strings with descriptions, outcomes, and timing, bounded to the latest **200 invocations**. Neither history owns result sets or selected live objects. Parameter redaction is performed by the execution adapter before recording; cached cells and object handles are not replayable commands. There is no separate related-result cache to evict.
+
+`ReleaseResult` immediately makes the handles unavailable to new actions/inspections. An already-running reader holds a lease until it exits, so release cannot dispose an object underneath a getter. Then the adapter drops its graph references and disposes each distinct disposable base object once within that result set. Session shutdown cancels queued work and waits for the serialized active operation before disposing retained results and the runspace. Results held by callers must be explicitly released; a live session variable or another external owner can still retain an object after its result is released.
+
+Display getters run on the execution worker, never the Avalonia dispatcher. The table receives completed cached scalar cells, not incrementally evaluated live properties. Failing getters display `(unavailable)` with an error tooltip and diagnostics; successful empty queries display a neutral "No objects were returned" message without opening Diagnostics. Queries with non-terminating errors keep usable rows and `CompletedWithErrors`; terminating failures retain their rows with an explicit incomplete-result warning. Banners count captured error **records**, not a guaranteed total of underlying getter failures: display diagnostics are bounded and summarize omitted failures.
+
+Property inspection has its own visible pending state and cancellation scope. Navigation, Stop, or closing cancels it and prevents a late properties dialog from opening. Blocking native getters remain cooperative-cancellation limits: they retain the session queue and reader lease until they return, without blocking the dispatcher or allowing another pipeline to use the runspace. Stop remains visible as stopping/unresponsive after two seconds if the same operation has not finished. Cancellation during display materialization is reflected in the final outcome even if the pipeline itself had already completed.
+
+`InvocationLifecycleTests` exercises the headless window/fixture seam, including controlled late completions, all four result policies, history eviction, and a real-runtime getter on the dispatcher boundary. `SessionLifetimeTests` uses the embedded runtime for empty/partial outcomes, weak-reference graph collection while cached rows survive, deferred reader disposal, queued cancellation, overlapping action/navigation/inspection, and shutdown. Gates signal from inside getters rather than using sleeps to guess when an operation started.
+
 ### Cancellation reference gate
 
 The real-runtime `InvocationHostTests.StopSleepReachesCancelledWithinTwoSecondsAndNextQuerySucceeds` measures from cancellation request to terminal Cancelled, not from invocation startup. It retains partial output and then verifies a subsequent provider query. The two-second threshold is enforced by both the test timeout and elapsed-time assertion.

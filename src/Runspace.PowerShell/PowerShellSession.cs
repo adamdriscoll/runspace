@@ -178,6 +178,8 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     public async Task<IReadOnlyList<ObjectProperty>> InspectAsync(Guid resultId, Guid handle,
         CancellationToken cancellationToken = default)
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        cancellationToken = linked.Token;
         await queue.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -236,6 +238,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                         properties.Add(new ObjectProperty("Registry values", "Registry", "(unavailable)", PropertyError(exception)));
                     }
                 }
+                cancellationToken.ThrowIfCancellationRequested();
                 return properties;
             }, cancellationToken).ConfigureAwait(false);
         }
@@ -370,6 +373,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                 failures.Summarize();
                 var outcome = invocation.Outcome == InvocationOutcome.Completed && failures.Count > 0
                     ? InvocationOutcome.CompletedWithErrors : invocation.Outcome;
+                if (cancellationToken.IsCancellationRequested) outcome = InvocationOutcome.Cancelled;
                 lock (resultLock) results.Add(id, stored);
                 var script = finalDescription?.Invoke() ?? description;
                 if (invocationContext.HasInput)
