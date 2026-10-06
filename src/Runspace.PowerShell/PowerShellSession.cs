@@ -13,13 +13,22 @@ using ProviderInfo = Runspace.Core.ProviderInfo;
 namespace Runspace.PowerShell;
 
 /// <summary>A local, profile-free PowerShell runspace with serialized built-in operations.</summary>
-public sealed class PowerShellSession : IConsoleSession
+public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
 {
     private readonly SemaphoreSlim queue = new(1, 1);
     private readonly object resultLock = new();
     private readonly Dictionary<Guid, StoredResult> results = [];
     private System.Management.Automation.Runspaces.Runspace? runspace;
     private bool disposed;
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly Guid sessionId = Guid.NewGuid();
+    private readonly InvocationHost host;
+    private ConcurrentQueue<DiagnosticRecord>? activeDiagnostics;
+
+    public PowerShellSession() => host = new((stream, message) => activeDiagnostics?.Enqueue(Diagnostic(stream, message)));
+    public Func<HostPrompt, CancellationToken, Task<HostResponse?>>? PromptHandler { get; set; }
+    public event Action<InvocationStatus>? StateChanged;
+    public bool StopInvocation(Guid invocationId) => host.Current?.Stop(invocationId) ?? false;
 
     public string RuntimeVersion => PSVersionInfo.PSVersion.ToString();
 
@@ -82,6 +91,8 @@ public sealed class PowerShellSession : IConsoleSession
     {
         ArgumentNullException.ThrowIfNull(selection);
         ArgumentNullException.ThrowIfNull(parameters);
+        selection = selection.ToArray();
+        parameters = new Dictionary<string, string>(parameters, StringComparer.OrdinalIgnoreCase);
         var resultKind = action switch
         {
             ConsoleActionId.ProcessModules => ResourceKind.ProcessModules,
@@ -110,6 +121,7 @@ public sealed class PowerShellSession : IConsoleSession
                     .AddParameter("PassThru").AddParameter("ErrorAction", ActionPreference.Stop);
                 if (parameters.TryGetValue("Arguments", out var arguments) && !string.IsNullOrWhiteSpace(arguments))
                     shell.AddParameter("ArgumentList", arguments);
+                ConfigureShouldProcess(shell, parameters);
                 return Invoke(shell, cancellationToken, diagnostics);
             }
             if (action == ConsoleActionId.AddDrive)
@@ -121,6 +133,7 @@ public sealed class PowerShellSession : IConsoleSession
                     .AddParameter("Root", Required(parameters, "Root"))
                     .AddParameter("Scope", "Global")
                     .AddParameter("ErrorAction", ActionPreference.Stop);
+                ConfigureShouldProcess(shell, parameters);
                 return Invoke(shell, cancellationToken, diagnostics);
             }
 
@@ -141,6 +154,7 @@ public sealed class PowerShellSession : IConsoleSession
                 {
                     using var shell = NewShell();
                     ConfigureAction(shell, action, row, parameters);
+                    ConfigureShouldProcess(shell, parameters);
                     var invocation = Invoke(shell, cancellationToken, diagnostics);
                     output.AddRange(invocation.Output);
                     if (invocation.Outcome == InvocationOutcome.Cancelled)
@@ -233,6 +247,7 @@ public sealed class PowerShellSession : IConsoleSession
         var result = await QueryAsync(new ConsoleNode("providers", "Providers", ResourceKind.Providers, "Session providers"), cancellationToken).ConfigureAwait(false);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             EnsureSuccessful(result);
             return result.Rows.Select(row => new ProviderInfo(row.Cells["Name"].Display, row.Cells["Capabilities"].Display)).ToArray();
         }
@@ -244,6 +259,7 @@ public sealed class PowerShellSession : IConsoleSession
         var result = await QueryAsync(new ConsoleNode("drives", "Drives", ResourceKind.Drives, "Session drives"), cancellationToken).ConfigureAwait(false);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             EnsureSuccessful(result);
             return result.Rows.Select(row => row.RelatedNode!).Where(node => node is not null).ToArray();
         }
@@ -262,6 +278,7 @@ public sealed class PowerShellSession : IConsoleSession
 
     public async ValueTask DisposeAsync()
     {
+        lifetime.Cancel();
         await queue.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -295,6 +312,10 @@ public sealed class PowerShellSession : IConsoleSession
         var stopwatch = Stopwatch.StartNew();
         var diagnostics = new ConcurrentQueue<DiagnosticRecord>();
         var id = Guid.NewGuid();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        using var invocationContext = new InvocationContext(sessionId, id, linked.Token, PromptHandler,
+            status => StateChanged?.Invoke(status));
+        cancellationToken = invocationContext.Token;
         try
         {
             await queue.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -308,6 +329,14 @@ public sealed class PowerShellSession : IConsoleSession
             return await Task.Run(() =>
             {
                 ThrowIfDisposed();
+                host.Current = invocationContext;
+                activeDiagnostics = diagnostics;
+                using var stopping = cancellationToken.Register(() =>
+                {
+                    invocationContext.Notify(InvocationState.Stopping);
+                    _ = ReportUnresponsiveAsync(invocationContext);
+                });
+                invocationContext.Notify(InvocationState.Running);
                 using var context = new DefaultRunspaceScope(null);
                 Invocation invocation;
                 try
@@ -324,21 +353,49 @@ public sealed class PowerShellSession : IConsoleSession
                 catch (Exception exception)
                 {
                     diagnostics.Enqueue(Diagnostic("Error", exception.ToString()));
-                    invocation = new Invocation([], InvocationOutcome.Failed);
+                    invocation = new Invocation([], cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
                 }
+                if (cancellationToken.IsCancellationRequested)
+                    invocation = invocation with { Outcome = InvocationOutcome.Cancelled };
                 var resolvedColumns = finalColumns?.Invoke() ?? columns;
                 var resolvedNode = finalNode?.Invoke() ?? node;
                 var stored = new StoredResult(kind);
                 var failures = new DisplayFailures(diagnostics);
-                var rows = invocation.Output.Select((value, index) => Materialize(value, resolvedColumns, stored, resolvedNode, index + 1, failures)).ToArray();
+                // Secure host input can be echoed or embedded in arbitrary result objects.
+                // Do not retain those object graphs or textual streams in the console.
+                var rows = invocationContext.HasSecrets ? [] :
+                    invocation.Output.Select((value, index) => Materialize(value, resolvedColumns, stored, resolvedNode, index + 1, failures)).ToArray();
                 failures.Summarize();
                 var outcome = invocation.Outcome == InvocationOutcome.Completed && failures.Count > 0
                     ? InvocationOutcome.CompletedWithErrors : invocation.Outcome;
                 lock (resultLock) results.Add(id, stored);
-                return new ConsoleResult(id, resolvedColumns, rows, finalDescription?.Invoke() ?? description, diagnostics.ToArray(), stopwatch.Elapsed, outcome);
+                var script = finalDescription?.Invoke() ?? description;
+                if (invocationContext.HasInput)
+                    script = "# Non-replayable: interactive host input is not recorded.\n" + script;
+                if (invocationContext.HasSecrets)
+                {
+                    script = "# Non-replayable: invocation used credentials/secure input; command and input are redacted.";
+                    diagnostics = new ConcurrentQueue<DiagnosticRecord>(diagnostics.Select(record =>
+                        record with { Message = "<REDACTED: invocation used secure input>" }));
+                    diagnostics.Enqueue(Diagnostic("Information", "Secure-input invocation output is not retained; textual diagnostics are redacted."));
+                }
+                return new ConsoleResult(id, resolvedColumns, rows, script, diagnostics.ToArray(), stopwatch.Elapsed, outcome,
+                    OutputSuppressed: invocationContext.HasSecrets);
             }).ConfigureAwait(false);
         }
-        finally { queue.Release(); }
+        finally
+        {
+            invocationContext.Finish();
+            host.Current = null;
+            activeDiagnostics = null;
+            queue.Release();
+        }
+    }
+
+    private static async Task ReportUnresponsiveAsync(InvocationContext context)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        context.Notify(InvocationState.Unresponsive);
     }
 
     private void EnsureRunspace()
@@ -348,7 +405,7 @@ public sealed class PowerShellSession : IConsoleSession
         var state = InitialSessionState.CreateDefault2();
         if (OperatingSystem.IsWindows())
             state.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.RemoteSigned;
-        var created = RunspaceFactory.CreateRunspace(state);
+        var created = RunspaceFactory.CreateRunspace(host, state);
         try
         {
             created.Open();
@@ -384,9 +441,10 @@ public sealed class PowerShellSession : IConsoleSession
         return shell;
     }
 
-    private static Invocation Invoke(AutomationShell shell, CancellationToken cancellationToken,
+    private Invocation Invoke(AutomationShell shell, CancellationToken cancellationToken,
         ConcurrentQueue<DiagnosticRecord> diagnostics)
     {
+        cancellationToken = host.Current?.Token ?? cancellationToken;
         using var output = new PSDataCollection<PSObject>();
         shell.Streams.Error.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Error", shell.Streams.Error[args.Index].ToString()));
         shell.Streams.Warning.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Warning", shell.Streams.Warning[args.Index].Message));
@@ -438,7 +496,23 @@ public sealed class PowerShellSession : IConsoleSession
         {
             if (!diagnostics.Any(record => record.Stream == "Error" && record.Message == exception.Message))
                 diagnostics.Enqueue(Diagnostic("Error", exception.Message));
-            return new Invocation(output.ToArray(), InvocationOutcome.Failed);
+            return new Invocation(output.ToArray(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
+        }
+    }
+
+    private void ConfigureShouldProcess(AutomationShell shell, IReadOnlyDictionary<string, string> parameters)
+    {
+        foreach (var name in new[] { "Confirm", "WhatIf" })
+        {
+            if (!parameters.TryGetValue(name, out var value)) continue;
+            if (!bool.TryParse(value, out var enabled))
+                throw new ArgumentException($"{name} must be True or False.");
+            var command = shell.Commands.Commands.Last();
+            var metadata = command.IsScript ? null :
+                runspace!.SessionStateProxy.InvokeCommand.GetCommand(command.CommandText, CommandTypes.Cmdlet | CommandTypes.Function);
+            if (metadata?.Parameters.ContainsKey(name) != true)
+                throw new ArgumentException($"This command does not support {name}.");
+            shell.AddParameter(name, enabled);
         }
     }
 
@@ -692,6 +766,7 @@ public sealed class PowerShellSession : IConsoleSession
 
     private static void EnsureSuccessful(ConsoleResult result)
     {
+        if (result.Outcome == InvocationOutcome.Cancelled) throw new OperationCanceledException("The session operation was cancelled.");
         if (result.Outcome != InvocationOutcome.Completed)
             throw new InvalidOperationException(string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => diagnostic.Message)));
     }
@@ -700,11 +775,14 @@ public sealed class PowerShellSession : IConsoleSession
         IReadOnlyList<LiveRow> selected, IReadOnlyList<Guid> handles)
     {
         string Parameter(string name) => parameters.TryGetValue(name, out var value) ? value : string.Empty;
+        var options = string.Concat(new[] { "Confirm", "WhatIf" }
+            .Where(name => parameters.TryGetValue(name, out var value) && bool.TryParse(value, out _))
+            .Select(name => $" -{name}:${bool.Parse(parameters[name]).ToString().ToLowerInvariant()}"));
         string Each(Func<LiveRow, string> format) => selected.Count > 0
-            ? string.Join(Environment.NewLine, selected.Select(format))
+            ? string.Join(Environment.NewLine, selected.Select(row => format(row) + options))
             : $"# Session-dependent {action}; selected handles: {string.Join(", ", handles)}";
         var processContext = $"# Session-dependent: retained live process objects; original Ids: {string.Join(", ", selected.Select(row => row.Identity?.Id.ToString(CultureInfo.InvariantCulture) ?? "unavailable"))}; handles: {string.Join(", ", handles)}";
-        return action switch
+        var description = action switch
         {
             ConsoleActionId.AddDrive => PowerShellDisplay.Command("New-PSDrive", ("Name", Parameter("Name")),
                 ("PSProvider", Parameter("Provider")), ("Root", Parameter("Root")), ("Scope", "Global"), ("ErrorAction", "Stop")),
@@ -732,6 +810,10 @@ public sealed class PowerShellSession : IConsoleSession
                 ("LiteralPath", $"Env:\\{row.Name}"), ("ErrorAction", "Stop"))),
             _ => $"# Session-dependent action: {action}; handles: {string.Join(", ", handles)}"
         };
+        if (action is not (ConsoleActionId.RemoveDrive or ConsoleActionId.StartService or ConsoleActionId.StopService
+            or ConsoleActionId.RestartService or ConsoleActionId.SetValue or ConsoleActionId.RemoveItem))
+            description += options;
+        return description;
     }
 
     private static string HistoryArguments(string arguments) => arguments.Trim() is "--version" or "--info" or "--help" or "-h" or "-?" or "/?"

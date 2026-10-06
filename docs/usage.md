@@ -103,15 +103,23 @@ Use **Export table...** to save the visible table as CSV. Filtering changes disp
 
 Operations run with your current account's permissions; UI confirmation does not grant elevated rights. Actions that change resources ask for parameters or confirmation where appropriate.
 
+Selection is frozen when an action begins, before parameter or host prompts open. Changing the selected row while a prompt is open never retargets that action. Command-backed actions offer **Preview only (PowerShell WhatIf)**; commands receive typed `WhatIf`/`Confirm` values only when they support them. Preview reports what PowerShell would do without performing the change. Explicitly confirmed actions use the command's own choice prompt; a direct process-priority assignment uses the console's confirmation instead.
+
+PowerShell host prompts support required/typed fields, single choices, credentials, ordinary input, and secure input. Type conversion runs on the execution side, not the Avalonia dispatcher. The prompt and main window remain responsive: **Stop**, **Stop invocation**, Cancel, closing the prompt, or closing the application releases a waiting host callback. Raw-terminal operations and nested terminal prompts are explicitly unsupported.
+
 Removing a provider drive does **not** delete the underlying files or resources. Environment edits change the application process's environment, not persistent user or machine settings.
 
-**Stop** requests cooperative PowerShell cancellation. It does not roll back side effects or guarantee interruption of blocked native calls. Completed, completed-with-errors, failed, and cancelled outcomes remain distinct; consult Diagnostics when results are incomplete or an action fails.
+**Stop** requests cooperative PowerShell cancellation. It does not roll back side effects or guarantee interruption of blocked native calls. If an invocation remains active two seconds after Stop, the status shows **Stopping / unresponsive**. The serialized session stays occupied until that call returns; the application does not dispose an active pipeline or claim it was terminated. Application close also requests Stop and waits for active work to finish safely.
+
+Completed, completed-with-errors, failed, and cancelled outcomes remain distinct; consult Diagnostics when results are incomplete or an action fails. Action definitions declare retain, refresh, replace, or related-view result handling. Built-in mutations refresh their source after execution, including failed/cancelled execution that may have left side effects; modules and threads open related results from the original retained process, with Back navigation to the source. Partial-failure diagnostics and the original action outcome remain visible even after a successful refresh.
 
 ## History and diagnostics
 
 **PowerShell History** records command representations, timing, and outcomes. Selected-object actions may depend on retained objects in the live session, so history is not an arbitrary replay engine. The latest 200 invocations are retained in memory.
 
 **Diagnostics** displays execution messages and errors separately from history. A query can return useful objects and still report errors; an empty successful query is different from a failed query.
+
+Interactive host input is not recorded and its history is labeled **Non-replayable**. Credentials and secure values are disposed after execution, and password editors are cleared when their prompt closes. Because scripts can echo or embed secrets in arbitrary objects, an invocation using credential/secure host input does not retain returned objects and redacts all textual diagnostics and its command representation. This conservative policy is visible in Diagnostics; it is not a security sandbox or a guarantee that arbitrary PowerShell scripts cannot keep or disclose their own copies.
 
 ## Saved settings
 

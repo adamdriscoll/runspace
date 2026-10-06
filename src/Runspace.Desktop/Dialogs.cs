@@ -1,15 +1,17 @@
+using System.Security;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Runspace.Core;
 
 namespace Runspace.Desktop;
 
 internal static class Dialogs
 {
-    public static async Task<bool> ConfirmAsync(Window owner, string title, string message)
+    public static async Task<bool> ConfirmAsync(Window owner, string title, string message, CancellationToken cancellationToken = default)
     {
         var dialog = Create(owner, title, 500);
         var panel = new StackPanel { Margin = new Thickness(16), Spacing = 14 };
@@ -17,17 +19,18 @@ internal static class Dialogs
         var buttons = Buttons();
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var accept = new Button { Content = "Execute" };
-        cancel.Click += (_, _) => dialog.Close(false);
-        accept.Click += (_, _) => dialog.Close(true);
+        cancel.Click += (_, _) => dialog.Complete(false);
+        accept.Click += (_, _) => dialog.Complete(true);
         buttons.Children.Add(cancel);
         buttons.Children.Add(accept);
         panel.Children.Add(buttons);
         dialog.Content = panel;
-        return await dialog.ShowDialog<bool>(owner);
+        return await ShowPromptAsync<bool>(dialog, owner, cancellationToken);
     }
 
     public static async Task<IReadOnlyDictionary<string, string>?> ParametersAsync(
-        Window owner, ConsoleAction action, string context, IReadOnlyList<ProviderInfo>? providers = null, string? currentValue = null)
+        Window owner, ConsoleAction action, string context, IReadOnlyList<ProviderInfo>? providers = null, string? currentValue = null,
+        CancellationToken cancellationToken = default)
     {
         var dialog = Create(owner, action.Name, 480);
         var panel = new StackPanel { Margin = new Thickness(16), Spacing = 10 };
@@ -37,7 +40,9 @@ internal static class Dialogs
         {
             panel.Children.Add(new TextBlock { Text = parameter.Label });
             Control input;
-            if (parameter.Name == "Provider" && providers is { Count: > 0 })
+            if (parameter.Choices is { Count: > 0 } choices)
+                input = new ComboBox { ItemsSource = choices, SelectedItem = parameter.DefaultValue, HorizontalAlignment = HorizontalAlignment.Stretch };
+            else if (parameter.Name == "Provider" && providers is { Count: > 0 })
             {
                 var names = providers.Select(provider => provider.Name).ToArray();
                 input = new ComboBox { ItemsSource = names, SelectedItem = names.Contains("FileSystem") ? "FileSystem" : names[0], HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -67,13 +72,139 @@ internal static class Dialogs
                 error.Text = $"{missing.Label} is required.";
                 return;
             }
-            dialog.Close(values);
+            dialog.Complete(values);
         };
         buttons.Children.Add(cancel);
         buttons.Children.Add(accept);
         panel.Children.Add(buttons);
         dialog.Content = panel;
-        return await dialog.ShowDialog<IReadOnlyDictionary<string, string>?>(owner);
+        return await ShowPromptAsync<IReadOnlyDictionary<string, string>?>(dialog, owner, cancellationToken);
+    }
+
+    public static async Task<HostResponse?> HostPromptAsync(Window owner, HostPrompt prompt, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dialog = Create(owner, string.IsNullOrWhiteSpace(prompt.Caption) ? "PowerShell input" : prompt.Caption, 520);
+        dialog.Name = "InvocationPrompt";
+        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = prompt.Message, TextWrapping = TextWrapping.Wrap });
+        var editors = new Dictionary<string, (TextBox Value, TextBox? Password)>();
+        ComboBox? choice = null;
+        if (prompt.Kind == HostPromptKind.Choice)
+        {
+            choice = new ComboBox
+            {
+                Name = "PromptChoice", ItemsSource = prompt.Choices.Select(item => item.Label.Replace("&", string.Empty)).ToArray(),
+                SelectedIndex = prompt.DefaultChoice, HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            panel.Children.Add(choice);
+            var help = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            choice.SelectionChanged += (_, _) => help.Text = choice.SelectedIndex >= 0 ? prompt.Choices[choice.SelectedIndex].Help : null;
+            panel.Children.Add(help);
+        }
+        foreach (var field in prompt.Fields)
+        {
+            panel.Children.Add(new TextBlock { Text = $"{field.Label} ({field.TypeName})" + (field.Required ? " *" : string.Empty) });
+            var credential = field.TypeName == "System.Management.Automation.PSCredential";
+            var secret = field.TypeName == "System.Security.SecureString";
+            var input = new TextBox { Name = field.Name, Text = secret ? null : field.DefaultValue, PasswordChar = secret ? '*' : '\0',
+                PlaceholderText = credential ? "User name" : null, IsReadOnly = field.IsReadOnly };
+            panel.Children.Add(input);
+            TextBox? password = null;
+            if (credential)
+            {
+                password = new TextBox { Name = field.Name + "Password", PasswordChar = '*', PlaceholderText = "Password" };
+                panel.Children.Add(password);
+            }
+            editors.Add(field.Name, (input, password));
+            if (!string.IsNullOrWhiteSpace(field.Help))
+                panel.Children.Add(new TextBlock { Text = field.Help, TextWrapping = TextWrapping.Wrap });
+        }
+        var error = new TextBlock { Name = "PromptError", Foreground = Brushes.DarkRed, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(error);
+        var buttons = Buttons();
+        var cancel = new Button { Name = "PromptCancel", Content = "Cancel", IsCancel = true };
+        var accept = new Button { Name = "PromptAccept", Content = "OK", IsDefault = true };
+        cancel.Click += (_, _) => dialog.Close();
+        accept.Click += async (_, _) =>
+        {
+            var values = new Dictionary<string, object?>();
+            foreach (var field in prompt.Fields)
+            {
+                var editor = editors[field.Name];
+                if (field.Required && (string.IsNullOrWhiteSpace(editor.Value.Text) ||
+                    editor.Password is not null && string.IsNullOrEmpty(editor.Password.Text)))
+                {
+                    error.Text = $"{field.Label} is required.";
+                    new HostResponse(values).Dispose();
+                    return;
+                }
+                values[field.Name] = editor.Password is not null
+                    ? new HostCredential(editor.Value.Text ?? string.Empty, Secure(editor.Password.Text))
+                    : field.TypeName == "System.Security.SecureString" ? Secure(editor.Value.Text) : editor.Value.Text ?? string.Empty;
+            }
+            var response = new HostResponse(values, choice?.SelectedIndex);
+            accept.IsEnabled = false;
+            try
+            {
+                var validation = await prompt.ValidateAsync(response);
+                if (cancellationToken.IsCancellationRequested || !dialog.IsVisible) { response.Dispose(); return; }
+                if (validation is not null) { error.Text = validation; response.Dispose(); return; }
+                dialog.Complete(response);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { response.Dispose(); }
+            catch (Exception)
+            {
+                response.Dispose();
+                dialog.Failure = new InvalidOperationException("Host input validation failed.");
+                dialog.Close();
+            }
+            finally { accept.IsEnabled = true; }
+        };
+        var stop = new Button { Name = "PromptStop", Content = "Stop invocation" };
+        stop.Click += (_, _) => dialog.Close();
+        buttons.Children.Add(stop);
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(accept);
+        panel.Children.Add(buttons);
+        dialog.Content = new ScrollViewer { Content = panel };
+        dialog.Closed += (_, _) =>
+        {
+            foreach (var editor in editors.Values)
+            {
+                editor.Value.Text = string.Empty;
+                if (editor.Password is not null) editor.Password.Text = string.Empty;
+            }
+        };
+        return await ShowPromptAsync<HostResponse?>(dialog, owner, cancellationToken);
+    }
+
+    private static SecureString Secure(string? text)
+    {
+        var secure = new SecureString();
+        foreach (var character in text ?? string.Empty) secure.AppendChar(character);
+        secure.MakeReadOnly();
+        return secure;
+    }
+
+    private sealed class PromptWindow : Window
+    {
+        public object? Response { get; private set; }
+        public Exception? Failure { get; set; }
+        public void Complete(object response) { Response = response; Close(); }
+    }
+
+    private static async Task<T?> ShowPromptAsync<T>(PromptWindow dialog, Window owner, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var completion = new TaskCompletionSource<T?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        dialog.Closed += (_, _) => completion.TrySetResult(dialog.Response is T response ? response : default);
+        using var registration = cancellationToken.Register(() => Dispatcher.UIThread.Post(() => dialog.Close()));
+        dialog.Show(owner);
+        if (cancellationToken.IsCancellationRequested) dialog.Close();
+        var result = await completion.Task;
+        if (dialog.Failure is not null) throw dialog.Failure;
+        return result;
     }
 
     public static async Task PropertiesAsync(Window owner, string name, IReadOnlyList<ObjectProperty> properties)
@@ -123,10 +254,10 @@ internal static class Dialogs
         await window.ShowDialog(owner);
     }
 
-    private static Window Create(Window owner, string title, double width) => new()
+    private static PromptWindow Create(Window owner, string title, double width) => new()
     {
         Title = title, Width = width, SizeToContent = SizeToContent.Height,
-        MaxHeight = Math.Max(400, owner.Height - 40), CanResize = false,
+        MaxHeight = Math.Max(400, double.IsFinite(owner.Height) ? owner.Height - 40 : 600), CanResize = false,
         WindowStartupLocation = WindowStartupLocation.CenterOwner
     };
 
