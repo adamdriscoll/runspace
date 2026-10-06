@@ -22,6 +22,7 @@ namespace Runspace.Desktop;
 
 public partial class MainWindow : Window
 {
+    private const string UnresponsiveStatus = "Stopping / unresponsive. A native call may still be active; hard termination is not guaranteed.";
     private readonly ConsoleViewModel _model = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<ConsoleNode> _navigationHistory = [];
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<ConsoleColumn> _columns = [];
     private IReadOnlyList<ConsoleRow> _rows = [];
     private DataGridCollectionView? _view;
+    private string _appliedFilter = string.Empty;
     private CancellationTokenSource? _active;
     private Guid? _promptInvocationId;
     private NavigationItem? _drivesRoot;
@@ -101,8 +103,6 @@ public partial class MainWindow : Window
         _session ??= await Task.Run<IConsoleSession>(() => new PowerShellSession(), _lifetime.Token);
         if (_session is IInvocationHostSession interactive)
         {
-            interactive.PromptHandler = async (prompt, token) =>
-                await Dispatcher.UIThread.InvokeAsync(() => PresentHostPromptAsync(prompt, token));
             interactive.StateChanged += InvocationStateChanged;
         }
         _model.Runtime = $"Local / PowerShell {_session.RuntimeVersion}";
@@ -113,18 +113,28 @@ public partial class MainWindow : Window
 
     private IConsoleSession Session => _session ?? throw new InvalidOperationException("PowerShell is not ready. Check Diagnostics for startup errors.");
 
-    private async Task<HostResponse?> PresentHostPromptAsync(HostPrompt prompt, CancellationToken token)
+    private void BindHostPrompt(long generation, CancellationToken operationToken)
     {
-        if (_closing) return null;
+        if (Session is IInvocationHostSession interactive)
+            interactive.PromptHandler = async (prompt, token) =>
+                await Dispatcher.UIThread.InvokeAsync(() => PresentHostPromptAsync(prompt, token, generation, operationToken));
+    }
+
+    private async Task<HostResponse?> PresentHostPromptAsync(HostPrompt prompt, CancellationToken token,
+        long generation, CancellationToken operationToken)
+    {
+        if (_closing || generation != _generation || operationToken.IsCancellationRequested || token.IsCancellationRequested) return null;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, operationToken, _lifetime.Token);
         var wasBusy = _model.IsBusy;
         _promptInvocationId = prompt.InvocationId;
         _model.IsBusy = true;
+        _model.Status = "Awaiting PowerShell input...";
         UpdateActions();
-        try { return await Dialogs.HostPromptAsync(this, prompt, token); }
+        try { return await Dialogs.HostPromptAsync(this, prompt, cancellation.Token); }
         finally
         {
-            _promptInvocationId = null;
-            if (!wasBusy && _active is null)
+            if (_promptInvocationId == prompt.InvocationId) _promptInvocationId = null;
+            if (!_closing && generation == _generation && !wasBusy && _active is null)
             {
                 _model.IsBusy = false;
                 UpdateActions();
@@ -132,20 +142,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void InvocationStateChanged(InvocationStatus status) => Dispatcher.UIThread.Post(() =>
+    private void InvocationStateChanged(InvocationStatus status)
     {
-        if (!_model.IsBusy && !_closing) return;
-        _model.Status = status.State switch
+        var active = _active;
+        Dispatcher.UIThread.Post(() =>
         {
-            InvocationState.AwaitingInput => "Awaiting PowerShell input...",
-            InvocationState.Stopping => "Stopping...",
-            InvocationState.Unresponsive => "Stopping / unresponsive. A native call may still be active; hard termination is not guaranteed.",
-            _ => "Running..."
-        };
-    });
+            if (_closing || !_model.IsBusy || _active != active) return;
+            // Prompt presentation owns its status; queued or superseded invocations cannot claim the current view.
+            if (status.InvocationId != _promptInvocationId) return;
+            if (status.State == InvocationState.Stopping) _model.Status = "Stopping...";
+            else if (status.State == InvocationState.Unresponsive)
+                _model.Status = UnresponsiveStatus;
+        });
+    }
 
     private async Task RefreshDrivesAsync()
     {
+        BindHostPrompt(_generation, _active?.Token ?? _lifetime.Token);
         var nodes = await Session.GetDriveNodesAsync(_lifetime.Token);
         if (_drivesRoot is null) return;
         _drivesRoot.Children.Clear();
@@ -168,6 +181,7 @@ public partial class MainWindow : Window
             item.IsLoading = true;
             try
             {
+                BindHostPrompt(_generation, _lifetime.Token);
                 var result = await Session.QueryAsync(item.Node, _lifetime.Token);
                 try
                 {
@@ -200,6 +214,7 @@ public partial class MainWindow : Window
         GoButton.IsVisible = LocationBox.IsVisible;
         Breadcrumb.IsVisible = !LocationBox.IsVisible;
         DocumentTabs.SelectedIndex = 0;
+        _appliedFilter = string.Empty;
         FilterBox.Text = string.Empty;
         if (addHistory)
         {
@@ -211,7 +226,9 @@ public partial class MainWindow : Window
         }
         UpdateNavigationButtons();
         _model.IsBusy = true;
-        _model.Status = $"Loading {node.Name}...";
+        _model.Status = $"Loading {node.Name}; query/display properties pending...";
+        ResultMessage.IsVisible = true;
+        ResultMessageText.Text = "Query and display-property evaluation pending. Previous objects, if any, remain visible until the result is ready.";
         UpdateActions();
         try
         {
@@ -220,6 +237,7 @@ public partial class MainWindow : Window
                 ShowOverview(node);
                 return;
             }
+            BindHostPrompt(generation, cancellation.Token);
             var result = await Session.QueryAsync(node, cancellation.Token);
             RecordInvocation(node.Name, result);
             if (_closing || generation != _generation)
@@ -234,20 +252,35 @@ public partial class MainWindow : Window
             _model.Runtime = $"Local / PowerShell {Session.RuntimeVersion}";
             var message = result.Outcome switch
             {
-                InvocationOutcome.Failed => "Query failed. See Diagnostics; this is not an empty successful result.",
+                InvocationOutcome.Failed => "Query failed. Retained objects are incomplete; this is not an empty successful result. See Diagnostics.",
                 InvocationOutcome.Cancelled => "Query cancelled. Displayed results may be incomplete.",
                 InvocationOutcome.CompletedWithErrors => "Some objects could not be retrieved or evaluated. See Diagnostics.",
                 _ when result.OutputSuppressed => "Output withheld because this invocation used credentials/secure input. See Diagnostics.",
                 _ when result.Rows.Count == 0 => "No objects were returned.",
                 _ => string.Empty
             };
+            if (result.Outcome is InvocationOutcome.Failed or InvocationOutcome.CompletedWithErrors)
+                message += ErrorSummary(result);
             ResultMessage.IsVisible = message.Length > 0;
             ResultMessageText.Text = message;
             _model.Status = $"{result.Outcome} - {node.Name} ({result.Duration.TotalSeconds:N2} s)";
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (!_closing && generation == _generation)
+            {
+                _model.Status = "Query cancelled.";
+                ResultMessage.IsVisible = true;
+                ResultMessageText.Text = "Query cancelled. Previous objects, if any, remain visible; no new result was accepted.";
+            }
+        }
+        catch (Exception exception)
+        {
+            ReportError(exception, updateView: !_closing && generation == _generation);
+        }
         finally
         {
-            if (generation == _generation)
+            if (!_closing && generation == _generation)
             {
                 _active = null;
                 _model.IsBusy = false;
@@ -333,6 +366,9 @@ public partial class MainWindow : Window
     private void FilterChanged(object? sender, TextChangedEventArgs e)
     {
         if (_view is null) return;
+        var filter = FilterBox.Text ?? string.Empty;
+        if (filter == _appliedFilter) return;
+        _appliedFilter = filter;
         var hadSelection = ResultsGrid.SelectedItems.Count > 0;
         _changingRows = true;
         try
@@ -345,7 +381,7 @@ public partial class MainWindow : Window
         finally { _changingRows = false; }
         UpdateCounts();
         UpdateActions();
-        if (hadSelection) _model.Status = "Selection cleared because the displayed filter changed.";
+        if (hadSelection && !_model.IsBusy) _model.Status = "Selection cleared because the displayed filter changed.";
     }
 
     private IReadOnlyList<ConsoleRow> SelectedRows() => ResultsGrid.SelectedItems.Cast<ConsoleRow>().ToArray();
@@ -431,7 +467,7 @@ public partial class MainWindow : Window
                 await NavigateAsync(related);
                 return;
             case ConsoleActionId.Properties when rows.Count == 1:
-                await Dialogs.PropertiesAsync(this, rows[0].Label, await Session.InspectAsync(resultId, rows[0].Handle, _lifetime.Token));
+                await InspectSelectionAsync(resultId, rows[0]);
                 return;
             case ConsoleActionId.Copy:
                 if (Clipboard is not { } clipboard) throw new NotSupportedException("The platform clipboard is unavailable.");
@@ -459,10 +495,15 @@ public partial class MainWindow : Window
             if (promptAction.Parameters is { Count: > 0 })
             {
                 _model.Status = $"Awaiting parameters for {action.Name}...";
+                BindHostPrompt(generation, cancellation.Token);
                 var providers = action.Id == ConsoleActionId.AddDrive ? await Session.GetProvidersAsync(cancellation.Token) : null;
                 var value = rows.Count == 1 ? rows[0].Cells.GetValueOrDefault("Value")?.Display : null;
                 var response = await Dialogs.ParametersAsync(this, promptAction, context, providers, value, cancellation.Token);
-                if (response is null) { _model.Status = $"{action.Name}: Cancelled"; return; }
+                if (response is null)
+                {
+                    if (!_closing && generation == _generation) _model.Status = $"{action.Name}: Cancelled";
+                    return;
+                }
                 parameters = new Dictionary<string, string>(response);
             }
             if (action.RequiresConfirmation)
@@ -471,12 +512,16 @@ public partial class MainWindow : Window
                     parameters["Confirm"] = "True";
                 else if (!await Dialogs.ConfirmAsync(this, action.Name,
                     $"{context}\n\nExecute on {rows.Count} fixed object(s)? This operation may change system state.", cancellation.Token))
-                { _model.Status = $"{action.Name}: Cancelled"; return; }
+                {
+                    if (!_closing && generation == _generation) _model.Status = $"{action.Name}: Cancelled";
+                    return;
+                }
             }
             cancellation.Token.ThrowIfCancellationRequested();
             if (_result?.Id != resultId && resultId != Guid.Empty)
                 throw new InvalidOperationException("The result changed while this action was being prepared. Select the objects again.");
             _model.Status = $"Running {action.Name}...";
+            BindHostPrompt(generation, cancellation.Token);
             var result = await Session.ExecuteAsync(action.Id, resultId, rows.Select(row => row.Handle).ToArray(), parameters, cancellation.Token);
             RecordInvocation(action.Name, result);
             var retained = false;
@@ -489,7 +534,13 @@ public partial class MainWindow : Window
                         case ActionResultPolicy.Refresh:
                             if (action.Id is ConsoleActionId.AddDrive or ConsoleActionId.RemoveDrive)
                                 await RefreshDrivesAsync();
-                            if (node is not null && _currentNode == node) await NavigateAsync(node, false);
+                            if (_closing || generation != _generation) return;
+                            if (node is not null && _currentNode == node)
+                            {
+                                var refreshGeneration = _generation + 1;
+                                await NavigateAsync(node, false);
+                                if (_closing || refreshGeneration != _generation) return;
+                            }
                             break;
                         case ActionResultPolicy.Replace:
                         case ActionResultPolicy.Related:
@@ -522,15 +573,58 @@ public partial class MainWindow : Window
                         ResultMessage.IsVisible = true;
                         ResultMessageText.Text = result.OutputSuppressed
                             ? $"{action.Name}: {result.Outcome}. Output withheld because this invocation used credentials/secure input; see Diagnostics."
-                            : $"{action.Name}: {result.Outcome}. Partial operations/results may remain; see Diagnostics.";
+                            : $"{action.Name}: {result.Outcome}. Partial operations/results may remain; see Diagnostics." + ErrorSummary(result);
                     }
                 }
             }
             finally { if (!retained) Session.ReleaseResult(result.Id); }
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (!_closing && generation == _generation) _model.Status = $"{action.Name}: Cancelled";
+        }
+        catch (Exception exception) when (_closing || generation != _generation)
+        {
+            ReportError(exception, updateView: false);
+        }
         finally
         {
-            if (_generation == generation && _active == cancellation)
+            if (!_closing && _generation == generation && _active == cancellation)
+            {
+                _active = null;
+                _model.IsBusy = false;
+                UpdateActions();
+            }
+        }
+    }
+
+    private async Task InspectSelectionAsync(Guid resultId, ConsoleRow row)
+    {
+        var generation = _generation;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _active = cancellation;
+        _model.IsBusy = true;
+        _model.Status = $"Inspecting {row.Label} properties (pending)...";
+        UpdateActions();
+        try
+        {
+            var properties = await Session.InspectAsync(resultId, row.Handle, cancellation.Token);
+            if (_closing || generation != _generation) return;
+            cancellation.Token.ThrowIfCancellationRequested();
+            _model.Status = $"Inspected {row.Label}.";
+            await Dialogs.PropertiesAsync(this, row.Label, properties);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (!_closing && generation == _generation) _model.Status = "Inspection cancelled.";
+        }
+        catch (Exception exception) when (_closing || generation != _generation)
+        {
+            ReportError(exception, updateView: false);
+        }
+        finally
+        {
+            if (!_closing && generation == _generation && _active == cancellation)
             {
                 _active = null;
                 _model.IsBusy = false;
@@ -554,6 +648,12 @@ public partial class MainWindow : Window
             _model.Diagnostics += $"{record.Timestamp:T} [{record.Stream}] {record.Message}\n";
         if (result.Outcome is not InvocationOutcome.Completed || result.OutputSuppressed)
             DiagnosticsPane.IsVisible = true;
+    }
+
+    private static string ErrorSummary(ConsoleResult result)
+    {
+        var count = result.Diagnostics.Count(record => record.Stream == "Error");
+        return $" ({count:N0} error record{(count == 1 ? string.Empty : "s")})";
     }
 
     private async Task ExportAsync()
@@ -674,12 +774,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ReportError(Exception exception)
+    private void ReportError(Exception exception, bool updateView = true)
     {
         Trace.TraceError(exception.ToString());
-        _model.Status = $"Error: {exception.Message}";
         _model.Diagnostics += $"{DateTimeOffset.Now:T} [Console error] {exception}\n";
         DiagnosticsPane.IsVisible = true;
+        if (!updateView) return;
+        _model.Status = $"Error: {exception.Message}";
         ResultMessage.IsVisible = true;
         ResultMessageText.Text = exception.Message;
     }
@@ -743,10 +844,18 @@ public partial class MainWindow : Window
     private async void RefreshClick(object? sender, RoutedEventArgs e) => await SafeAsync(RefreshAsync);
     private void StopClick(object? sender, RoutedEventArgs e)
     {
-        _active?.Cancel();
+        var active = _active;
+        _model.Status = "Stopping...";
+        active?.Cancel();
         if (_promptInvocationId is { } id && _session is IInvocationHostSession interactive)
             interactive.StopInvocation(id);
-        _model.Status = "Stopping...";
+        if (active is not null) _ = ReportStoppedOperationAsync(active, _generation);
+    }
+    private async Task ReportStoppedOperationAsync(CancellationTokenSource active, long generation)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        if (!_closing && generation == _generation && _active == active && _model.IsBusy && active.IsCancellationRequested)
+            _model.Status = UnresponsiveStatus;
     }
     private async void BackClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => MoveHistoryAsync(-1));
     private async void ForwardClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => MoveHistoryAsync(1));
