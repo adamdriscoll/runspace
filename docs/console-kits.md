@@ -1,6 +1,6 @@
 # Console Kits
 
-Status: proposed replacement for PowerPacks. **Console Kit** and the `.rskit` extension are working names; neither is an implemented compatibility promise.
+Status: proposed extension contract, not an implemented feature. **Console Kit** and the `.rskit` extension are working names; neither is an implemented compatibility promise. Implementation and decision work are tracked in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).
 
 ## Purpose and relationship to PowerGUI
 
@@ -168,8 +168,8 @@ Exports omit secrets, trust grants, object data, machine-specific paths, and liv
 
 ## Authoring scope
 
-First support inspect/import/enable/disable/remove and a development folder. Then add export, validation diagnostics, and an authoring form for nodes/queries/actions/views.
+Development folders and graphical authoring should use the same schema, validation, trust, and ownership rules as distributable packages. Feature sequencing and completion status belong in the issue tracker.
 
 Keep the classic administrator-friendly experience: a node's properties explain its query, output columns, related views, and actions. Editing a query reveals PowerShell rather than imposing a proprietary visual workflow language.
 
-A legacy `.powerpack` importer is later research. It must preview unsupported features, never execute imported scripts automatically, and require rights to the imported content. Do not ship the supplied historical packs as Runspace kits.
+Any legacy `.powerpack` import must preview unsupported features, never execute imported scripts automatically, and require rights to the imported content. Do not ship the supplied historical packs as Runspace kits.

@@ -1,6 +1,6 @@
 # Implemented administration foundation
 
-This iteration implements the built-in administration console. The earlier architecture, UX, kit-format, and roadmap documents remain planning context, not a statement that all their proposals are implemented. The user's current scope explicitly defers extensibility, Console Kits, and installer development.
+This iteration implements the built-in administration console. The architecture, UX, and kit-format proposals remain design context, not a statement that all their proposals are implemented. Extensibility, Console Kits, and installer development are deferred; remaining work and acceptance gates are tracked in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).
 
 ## Project layout
 
@@ -57,4 +57,4 @@ The desktop project has separate Debug/Release lock files because its developmen
 
 GitHub Actions uses a three-OS matrix, runs tests, publishes self-contained runtime-specific outputs, and uploads build/test artifacts. Configuring the workflow is not evidence that it has already run remotely.
 
-Refer to the [README](../README.md) for commands and interaction details.
+See [Contributing](../CONTRIBUTING.md) for development commands and the [usage guide](usage.md) for console interactions.
