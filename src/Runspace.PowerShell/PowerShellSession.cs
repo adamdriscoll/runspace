@@ -296,11 +296,13 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     }
 
     // Internal scripts are limited to runtime validation and the test assembly.
-    internal Task<ConsoleResult> InvokeForTestingAsync(string script, CancellationToken cancellationToken = default) =>
+    internal Task<ConsoleResult> InvokeForTestingAsync(string script, CancellationToken cancellationToken = default,
+        IReadOnlyList<object>? arguments = null) =>
         RunAsync([new("Value", "Value")], "Internal runtime test", ResourceKind.Overview, cancellationToken, diagnostics =>
         {
             using var shell = NewShell();
             shell.AddScript(script);
+            foreach (var argument in arguments ?? []) shell.AddArgument(argument);
             return Invoke(shell, cancellationToken, diagnostics);
         });
 
@@ -446,6 +448,8 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     {
         cancellationToken = host.Current?.Token ?? cancellationToken;
         using var output = new PSDataCollection<PSObject>();
+        // The SDK host can return a null sentinel when it handles PipelineStoppedException.
+        PSObject[] CapturedOutput() => output.Where(value => value is not null).ToArray();
         shell.Streams.Error.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Error", shell.Streams.Error[args.Index].ToString()));
         shell.Streams.Warning.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Warning", shell.Streams.Warning[args.Index].Message));
         shell.Streams.Information.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Information", Display(shell.Streams.Information[args.Index].MessageData)));
@@ -456,18 +460,15 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
             var progress = shell.Streams.Progress[args.Index];
             diagnostics.Enqueue(Diagnostic("Progress", $"{progress.Activity}: {progress.StatusDescription} ({progress.PercentComplete}%)"));
         };
-        Task? stopTask = null;
+        IAsyncResult? stop = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var invocation = shell.BeginInvoke<PSObject, PSObject>(null, output);
             using var registration = cancellationToken.Register(() =>
             {
-                stopTask = Task.Run(() =>
-                {
-                    try { shell.Stop(); }
-                    catch (InvalidPowerShellStateException) { /* Completion won the stop race. */ }
-                });
+                try { stop = shell.BeginStop(null, null); }
+                catch (InvalidPowerShellStateException) { /* Completion won the stop race. */ }
             });
             try
             {
@@ -476,27 +477,27 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
             finally
             {
                 registration.Dispose();
-                stopTask?.GetAwaiter().GetResult();
+                if (stop is not null) shell.EndStop(stop);
             }
-            return new Invocation(output.ToArray(), cancellationToken.IsCancellationRequested
+            return new Invocation(CapturedOutput(), cancellationToken.IsCancellationRequested
                 ? InvocationOutcome.Cancelled
                 : shell.HadErrors ? InvocationOutcome.CompletedWithErrors : InvocationOutcome.Completed);
         }
         catch (OperationCanceledException)
         {
-            return new Invocation(output.ToArray(), InvocationOutcome.Cancelled);
+            return new Invocation(CapturedOutput(), InvocationOutcome.Cancelled);
         }
         catch (PipelineStoppedException exception)
         {
             if (!cancellationToken.IsCancellationRequested)
                 diagnostics.Enqueue(Diagnostic("Error", exception.Message));
-            return new Invocation(output.ToArray(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
+            return new Invocation(CapturedOutput(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
         }
         catch (RuntimeException exception)
         {
             if (!diagnostics.Any(record => record.Stream == "Error" && record.Message == exception.Message))
                 diagnostics.Enqueue(Diagnostic("Error", exception.Message));
-            return new Invocation(output.ToArray(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
+            return new Invocation(CapturedOutput(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
         }
     }
 

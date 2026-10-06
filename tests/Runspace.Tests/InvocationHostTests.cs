@@ -13,7 +13,7 @@ public sealed class InvocationHostTests(ITestOutputHelper output)
     private static readonly ConsoleNode Providers = BuiltInCatalog.LocalSystem.Single(node => node.Kind == ResourceKind.Providers);
     private static void Completed(ConsoleResult result) => Assert.True(result.Outcome == InvocationOutcome.Completed,
         $"{result.Outcome}: {string.Join("\n", result.Diagnostics.Select(record => record.Message))}");
-    private static async Task AwaitPrompt(Task<HostPrompt> signal, Task<ConsoleResult> running)
+    private static async Task AwaitPrompt(Task signal, Task<ConsoleResult> running)
     {
         var completed = await Task.WhenAny(signal, running).WaitAsync(TimeSpan.FromSeconds(10));
         if (completed != signal)
@@ -86,6 +86,17 @@ public sealed class InvocationHostTests(ITestOutputHelper output)
         var result = await session.InvokeForTestingAsync("function Test-Boolean { param([Parameter(Mandatory)][bool]$Enabled) $Enabled }; Test-Boolean");
         Completed(result);
         Assert.Equal(false, Assert.Single(result.Rows).Cells["Value"].Value);
+    }
+
+    [Fact]
+    public async Task NullPipelineValuesDoNotCreateHandlesButNullObjectPropertiesRemainVisible()
+    {
+        await using var session = new PowerShellSession();
+        var result = await session.InvokeForTestingAsync("$null; [pscustomobject]@{ Value = $null }");
+        Completed(result);
+        Assert.Null(Assert.Single(result.Rows).Cells["Value"].Value);
+        Assert.Equal("(null)", result.Rows[0].Cells["Value"].Display);
+        session.ReleaseResult(result.Id);
     }
 
     [Theory]
@@ -164,7 +175,7 @@ public sealed class InvocationHostTests(ITestOutputHelper output)
             await Task.Delay(Timeout.Infinite, token);
             return null;
         };
-        var running = session.InvokeForTestingAsync("'partial'; $Host.UI.ReadLine(); 'never'", cancellation.Token);
+        var running = session.InvokeForTestingAsync("'partial'; Read-Host 'Wait'; 'never'", cancellation.Token);
         await AwaitPrompt(signal.Task, running);
         var queued = session.QueryAsync(Providers);
         var watch = Stopwatch.StartNew();
@@ -181,7 +192,9 @@ public sealed class InvocationHostTests(ITestOutputHelper output)
     {
         await using var session = new PowerShellSession();
         session.PromptHandler = (prompt, token) => Task.FromResult<HostResponse?>(null);
-        Assert.Equal(InvocationOutcome.Cancelled, (await session.InvokeForTestingAsync("$Host.UI.ReadLine()")).Outcome);
+        var dismissed = await session.InvokeForTestingAsync("'partial'; Read-Host 'Cancel'; 'never'");
+        Assert.Equal(InvocationOutcome.Cancelled, dismissed.Outcome);
+        Assert.Equal("partial", Assert.Single(dismissed.Rows).Cells["Value"].Value);
         var signal = Signal();
         session.PromptHandler = async (prompt, token) =>
         {
@@ -244,29 +257,56 @@ public sealed class InvocationHostTests(ITestOutputHelper output)
         output.WriteLine($"Start-Sleep stop-to-terminal: {watch.Elapsed.TotalMilliseconds:F1} ms");
     }
 
-    [Fact]
-    public async Task NativeCallRemainsUnresponsiveUntilItReturnsWithoutDisposingPipeline()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2000)]
+    public async Task NativeCallRemainsUnresponsiveUntilItReturnsWithoutDisposingPipeline(int promptDelayMilliseconds)
     {
         await using var session = new PowerShellSession();
-        var signal = Signal();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEvent(false);
         var unresponsive = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         session.StateChanged += status => { if (status.State == InvocationState.Unresponsive) unresponsive.TrySetResult(); };
-        session.PromptHandler = (prompt, token) =>
+        session.PromptHandler = async (prompt, token) =>
         {
-            signal.SetResult(prompt);
-            return Task.FromResult<HostResponse?>(Response("Value", "ready"));
+            await Task.Delay(promptDelayMilliseconds, token);
+            return Response("Value", "ready");
         };
         using var cancellation = new CancellationTokenSource();
-        var running = session.InvokeForTestingAsync("$null = $Host.UI.ReadLine(); [Threading.Thread]::Sleep(4000); 'never'", cancellation.Token);
-        await signal.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await Task.Delay(200);
-        cancellation.Cancel();
-        var query = session.QueryAsync(Providers);
-        await unresponsive.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.False(running.IsCompleted);
-        Assert.False(query.IsCompleted);
-        Assert.Equal(InvocationOutcome.Cancelled, (await running.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
-        Assert.Equal(InvocationOutcome.Completed, (await query).Outcome);
+        var running = session.InvokeForTestingAsync("""
+            param($fixture)
+            $null = $Host.UI.ReadLine()
+            $fixture.Wait()
+            'never'
+            """, cancellation.Token, [new NativeCallFixture(entered, release)]);
+        try
+        {
+            await AwaitPrompt(entered.Task, running);
+            cancellation.Cancel();
+            var query = session.QueryAsync(Providers);
+            await unresponsive.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(running.IsCompleted);
+            Assert.False(query.IsCompleted);
+            release.Set();
+            Assert.Equal(InvocationOutcome.Cancelled, (await running.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+            Assert.Equal(InvocationOutcome.Completed, (await query.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+        }
+        finally
+        {
+            release.Set();
+            await running.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    public sealed class NativeCallFixture(TaskCompletionSource entered, WaitHandle release)
+    {
+        public void Wait()
+        {
+            // Signal from inside the non-cooperative call, with no intervening PowerShell cancellation checkpoint.
+            entered.TrySetResult();
+            if (!release.WaitOne(TimeSpan.FromSeconds(30)))
+                throw new TimeoutException("The native-call test fixture was not released.");
+        }
     }
 
     [Fact]

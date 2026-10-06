@@ -42,7 +42,7 @@ internal sealed class InvocationContext(Guid sessionId, Guid id, CancellationTok
         IReadOnlyList<HostChoice>? choices = null, int defaultChoice = -1,
         Func<HostResponse, string?>? validate = null)
     {
-        Token.ThrowIfCancellationRequested();
+        if (Token.IsCancellationRequested) throw new PipelineStoppedException();
         if (handler is null)
             throw new NotSupportedException("This invocation requires interactive host input, but no prompt handler is connected.");
         HasInput = true;
@@ -66,13 +66,18 @@ internal sealed class InvocationContext(Guid sessionId, Guid id, CancellationTok
             if (response is null)
             {
                 cancellation.Cancel();
-                throw new OperationCanceledException(Token);
+                throw new PipelineStoppedException();
             }
             responses.Add(response);
             Token.ThrowIfCancellationRequested();
             var error = validate?.Invoke(response);
             if (error is not null) throw new ArgumentException(error);
             return response;
+        }
+        catch (OperationCanceledException) when (Token.IsCancellationRequested)
+        {
+            // A plain cancellation exception can become a non-terminating method error in PowerShell.
+            throw new PipelineStoppedException();
         }
         finally { Notify(InvocationState.Running); }
     }
