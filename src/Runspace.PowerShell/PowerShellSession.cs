@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Management.Automation;
@@ -23,9 +22,15 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     private readonly CancellationTokenSource lifetime = new();
     private readonly Guid sessionId = Guid.NewGuid();
     private readonly InvocationHost host;
-    private ConcurrentQueue<DiagnosticRecord>? activeDiagnostics;
+    private DiagnosticBuffer? activeDiagnostics;
+    private InvocationCapture? activeCapture;
 
-    public PowerShellSession() => host = new((stream, message) => activeDiagnostics?.Enqueue(Diagnostic(stream, message)));
+    public PowerShellSession() => host = new((stream, message) =>
+    {
+        activeDiagnostics?.Add(Diagnostic(stream, message));
+        if (activeDiagnostics?.ErrorCount >= RetentionPolicy.ErrorRecords)
+            activeCapture?.StopForLimit($"the {RetentionPolicy.ErrorRecords:N0}-error budget was reached");
+    });
     public Func<HostPrompt, CancellationToken, Task<HostResponse?>>? PromptHandler { get; set; }
     public event Action<InvocationStatus>? StateChanged;
     public bool StopInvocation(Guid invocationId) => host.Current?.Stop(invocationId) ?? false;
@@ -42,7 +47,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
         {
             if (((node.Kind != ResourceKind.ProviderPath && node.WindowsOnly) || RequiresWindows(node.Kind)) && !OperatingSystem.IsWindows())
             {
-                diagnostics.Enqueue(Diagnostic("Error", $"{node.Name} is available only on Windows."));
+                diagnostics.Add(Diagnostic("Error", $"{node.Name} is available only on Windows."));
                 return new Invocation([], InvocationOutcome.Failed);
             }
             if (node.Kind == ResourceKind.ProviderPath)
@@ -55,7 +60,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                     WindowsOnly = provider.Name is "Registry" or "Certificate"
                 };
                 query = QueryDefinition.For(resolvedNode);
-                diagnostics.Enqueue(Diagnostic("Information", $"Source provider: {provider.Name}; drive: {drive?.Name ?? "(provider-qualified path)"}."));
+                diagnostics.Add(Diagnostic("Information", $"Source provider: {provider.Name}; drive: {drive?.Name ?? "(provider-qualified path)"}."));
             }
 
             if (node.Kind == ResourceKind.NetworkProperties)
@@ -159,13 +164,15 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                     output.AddRange(invocation.Output);
                     if (invocation.Outcome == InvocationOutcome.Cancelled)
                         return new Invocation(output, InvocationOutcome.Cancelled);
+                    if (activeCapture?.LimitReached == true)
+                        return new Invocation(output, InvocationOutcome.Failed);
                     errors |= invocation.Outcome != InvocationOutcome.Completed;
                     if (invocation.Outcome is InvocationOutcome.Completed or InvocationOutcome.CompletedWithErrors)
                         successes++;
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
                 {
-                    diagnostics.Enqueue(Diagnostic("Error", exception.Message));
+                    diagnostics.Add(Diagnostic("Error", exception.Message));
                     errors = true;
                 }
             }
@@ -300,8 +307,8 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
 
     // Internal scripts are limited to runtime validation and the test assembly.
     internal Task<ConsoleResult> InvokeForTestingAsync(string script, CancellationToken cancellationToken = default,
-        IReadOnlyList<object>? arguments = null) =>
-        RunAsync([new("Value", "Value")], "Internal runtime test", ResourceKind.Overview, cancellationToken, diagnostics =>
+        IReadOnlyList<object>? arguments = null, IReadOnlyList<ConsoleColumn>? columns = null) =>
+        RunAsync(columns ?? [new("Value", "Value")], "Internal runtime test", ResourceKind.Overview, cancellationToken, diagnostics =>
         {
             using var shell = NewShell();
             shell.AddScript(script);
@@ -310,12 +317,13 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
         });
 
     private async Task<ConsoleResult> RunAsync(IReadOnlyList<ConsoleColumn> columns, string description, ResourceKind kind,
-        CancellationToken cancellationToken, Func<ConcurrentQueue<DiagnosticRecord>, Invocation> operation, ConsoleNode? node = null,
+        CancellationToken cancellationToken, Func<DiagnosticBuffer, Invocation> operation, ConsoleNode? node = null,
         Func<string>? finalDescription = null, Func<IReadOnlyList<ConsoleColumn>>? finalColumns = null,
         Func<ConsoleNode>? finalNode = null)
     {
         var stopwatch = Stopwatch.StartNew();
-        var diagnostics = new ConcurrentQueue<DiagnosticRecord>();
+        var diagnostics = new DiagnosticBuffer();
+        var capture = new InvocationCapture(stopwatch);
         var id = Guid.NewGuid();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
         using var invocationContext = new InvocationContext(sessionId, id, linked.Token, PromptHandler,
@@ -336,6 +344,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                 ThrowIfDisposed();
                 host.Current = invocationContext;
                 activeDiagnostics = diagnostics;
+                activeCapture = capture;
                 using var stopping = cancellationToken.Register(() =>
                 {
                     invocationContext.Notify(InvocationState.Stopping);
@@ -357,7 +366,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                 }
                 catch (Exception exception)
                 {
-                    diagnostics.Enqueue(Diagnostic("Error", exception.ToString()));
+                    diagnostics.Add(Diagnostic("Error", exception.ToString()));
                     invocation = new Invocation([], cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
                 }
                 if (cancellationToken.IsCancellationRequested)
@@ -366,27 +375,63 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
                 var resolvedNode = finalNode?.Invoke() ?? node;
                 var stored = new StoredResult(kind);
                 var failures = new DisplayFailures(diagnostics);
+                if (invocation.Output.Count > RetentionPolicy.ResultRows)
+                {
+                    var kept = invocation.Output.Take(RetentionPolicy.ResultRows).Select(value => value.BaseObject)
+                        .ToHashSet(ReferenceEqualityComparer.Instance);
+                    DisposeOutput(invocation.Output.Skip(RetentionPolicy.ResultRows).Where(value => !kept.Contains(value.BaseObject)));
+                    capture.StopForLimit($"more than {RetentionPolicy.ResultRows:N0} output objects were produced");
+                }
                 // Secure host input can be echoed or embedded in arbitrary result objects.
                 // Do not retain those object graphs or textual streams in the console.
                 var rows = invocationContext.HasSecrets ? [] :
-                    invocation.Output.Select((value, index) => Materialize(value, resolvedColumns, stored, resolvedNode, index + 1, failures)).ToArray();
+                    invocation.Output.Take(RetentionPolicy.ResultRows)
+                        .Select((value, index) => Materialize(value, resolvedColumns, stored, resolvedNode, index + 1, failures)).ToArray();
+                if (invocationContext.HasSecrets)
+                    DisposeOutput(invocation.Output);
                 failures.Summarize();
                 var outcome = invocation.Outcome == InvocationOutcome.Completed && failures.Count > 0
                     ? InvocationOutcome.CompletedWithErrors : invocation.Outcome;
                 if (cancellationToken.IsCancellationRequested) outcome = InvocationOutcome.Cancelled;
-                lock (resultLock) results.Add(id, stored);
+                var notices = new List<string>();
+                if (capture.LimitReached)
+                {
+                    notices.Add($"Execution stopped by retention policy: {capture.LimitReason}. Retained results are incomplete. " +
+                        "Export the retained visible rows before leaving; refresh/requery a narrower scope, " +
+                        "or deliberately run a replayable read-only command in a separate PowerShell with Export-Csv/file logging. " +
+                        "Do not automatically replay mutations, interactive or redacted commands.");
+                    if (outcome != InvocationOutcome.Cancelled) outcome = InvocationOutcome.Failed;
+                }
+                lock (resultLock)
+                {
+                    if (stored.Rows.Count > 0 && results.Count >= RetentionPolicy.ResultSets)
+                    {
+                        stored.DisposeObjects();
+                        rows = [];
+                        var executionOutcome = outcome;
+                        if (outcome != InvocationOutcome.Cancelled) outcome = InvocationOutcome.Failed;
+                        notices.Add($"The {RetentionPolicy.ResultSets}-live-result budget is full. New output was released, not retained; existing handles remain valid. " +
+                            $"Execution outcome before admission: {executionOutcome}; side effects may remain. " +
+                            "Export/release an existing view and requery. No complete-output export is possible from this discarded result.");
+                    }
+                    if (stored.Rows.Count > 0) results.Add(id, stored);
+                }
                 var script = finalDescription?.Invoke() ?? description;
                 if (invocationContext.HasInput)
                     script = "# Non-replayable: interactive host input is not recorded.\n" + script;
                 if (invocationContext.HasSecrets)
                 {
                     script = "# Non-replayable: invocation used credentials/secure input; command and input are redacted.";
-                    diagnostics = new ConcurrentQueue<DiagnosticRecord>(diagnostics.Select(record =>
-                        record with { Message = "<REDACTED: invocation used secure input>" }));
-                    diagnostics.Enqueue(Diagnostic("Information", "Secure-input invocation output is not retained; textual diagnostics are redacted."));
+                    var redacted = new DiagnosticBuffer();
+                    foreach (var record in diagnostics.Snapshot())
+                        redacted.Add(record with { Message = "<REDACTED: invocation used secure input>" });
+                    redacted.Add(Diagnostic("Information", "Secure-input invocation output is not retained; textual diagnostics are redacted."));
+                    diagnostics = redacted;
                 }
-                return new ConsoleResult(id, resolvedColumns, rows, script, diagnostics.ToArray(), stopwatch.Elapsed, outcome,
-                    OutputSuppressed: invocationContext.HasSecrets);
+                return new ConsoleResult(id, resolvedColumns, rows, script, diagnostics.Snapshot(), stopwatch.Elapsed, outcome,
+                    OutputSuppressed: invocationContext.HasSecrets, RetentionNotice: notices.Count == 0 ? null : string.Join("\n", notices),
+                    Measurements: new(capture.FirstOutputLatency, capture.OutputReceived, capture.PeakOutputBuffer,
+                        activeDiagnostics!.ReceivedCount, activeDiagnostics.PeakCount));
             }).ConfigureAwait(false);
         }
         finally
@@ -394,6 +439,7 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
             invocationContext.Finish();
             host.Current = null;
             activeDiagnostics = null;
+            activeCapture = null;
             queue.Release();
         }
     }
@@ -448,32 +494,72 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     }
 
     private Invocation Invoke(AutomationShell shell, CancellationToken cancellationToken,
-        ConcurrentQueue<DiagnosticRecord> diagnostics)
+        DiagnosticBuffer diagnostics)
     {
         cancellationToken = host.Current?.Token ?? cancellationToken;
         using var output = new PSDataCollection<PSObject>();
-        // The SDK host can return a null sentinel when it handles PipelineStoppedException.
-        PSObject[] CapturedOutput() => output.Where(value => value is not null).ToArray();
-        shell.Streams.Error.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Error", shell.Streams.Error[args.Index].ToString()));
-        shell.Streams.Warning.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Warning", shell.Streams.Warning[args.Index].Message));
-        shell.Streams.Information.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Information", Display(shell.Streams.Information[args.Index].MessageData)));
-        shell.Streams.Verbose.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Verbose", shell.Streams.Verbose[args.Index].Message));
-        shell.Streams.Debug.DataAdded += (_, args) => diagnostics.Enqueue(Diagnostic("Debug", shell.Streams.Debug[args.Index].Message));
-        shell.Streams.Progress.DataAdded += (_, args) =>
-        {
-            var progress = shell.Streams.Progress[args.Index];
-            diagnostics.Enqueue(Diagnostic("Progress", $"{progress.Activity}: {progress.StatusDescription} ({progress.PercentComplete}%)"));
-        };
+        var capture = activeCapture ?? throw new InvalidOperationException("No active invocation capture.");
+        var retained = new List<PSObject>();
+        var unsubscribe = new List<Action>();
+        var stopGate = new object();
         IAsyncResult? stop = null;
+        void RequestStop()
+        {
+            lock (stopGate)
+            {
+                if (stop is not null) return;
+                try { stop = shell.BeginStop(null, null); }
+                catch (InvalidPowerShellStateException) { /* Completion won the stop race. */ }
+            }
+        }
+        capture.RequestStop = RequestStop;
+        void DrainOutput()
+        {
+            capture.PeakOutputBuffer = Math.Max(capture.PeakOutputBuffer, output.Count);
+            foreach (var value in output.ReadAll())
+            {
+                // The SDK host can return a null sentinel when handling PipelineStoppedException.
+                if (value is null) continue;
+                capture.FirstOutputLatency ??= capture.Stopwatch.Elapsed;
+                capture.OutputReceived++;
+                if (capture.OutputReceived <= RetentionPolicy.ResultRows)
+                {
+                    retained.Add(value);
+                    capture.RetainedObjects.Add(value.BaseObject);
+                }
+                else
+                {
+                    if (!capture.RetainedObjects.Contains(value.BaseObject) && value.BaseObject is IDisposable disposable)
+                        disposable.Dispose();
+                    capture.StopForLimit($"more than {RetentionPolicy.ResultRows:N0} output objects were produced");
+                }
+            }
+        }
+        void Watch<T>(PSDataCollection<T> stream, string name, Func<T, string> message)
+        {
+            EventHandler<DataAddedEventArgs> handler = (_, _) =>
+            {
+                foreach (var record in stream.ReadAll())
+                    diagnostics.Add(Diagnostic(name, message(record)));
+                if (diagnostics.ErrorCount >= RetentionPolicy.ErrorRecords)
+                    capture.StopForLimit($"the {RetentionPolicy.ErrorRecords:N0}-error budget was reached");
+            };
+            stream.DataAdded += handler;
+            unsubscribe.Add(() => stream.DataAdded -= handler);
+        }
+        EventHandler<DataAddedEventArgs> outputAdded = (_, _) => DrainOutput();
+        output.DataAdded += outputAdded;
+        Watch(shell.Streams.Error, "Error", record => record.ToString());
+        Watch(shell.Streams.Warning, "Warning", record => record.Message);
+        Watch(shell.Streams.Information, "Information", record => Display(record.MessageData));
+        Watch(shell.Streams.Verbose, "Verbose", record => record.Message);
+        Watch(shell.Streams.Debug, "Debug", record => record.Message);
+        Watch(shell.Streams.Progress, "Progress", record => $"{record.Activity}: {record.StatusDescription} ({record.PercentComplete}%)");
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var invocation = shell.BeginInvoke<PSObject, PSObject>(null, output);
-            using var registration = cancellationToken.Register(() =>
-            {
-                try { stop = shell.BeginStop(null, null); }
-                catch (InvalidPowerShellStateException) { /* Completion won the stop race. */ }
-            });
+            using var registration = cancellationToken.Register(RequestStop);
             try
             {
                 shell.EndInvoke(invocation);
@@ -481,28 +567,46 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
             finally
             {
                 registration.Dispose();
-                if (stop is not null) shell.EndStop(stop);
+                IAsyncResult? requested;
+                lock (stopGate) requested = stop;
+                if (requested is not null) shell.EndStop(requested);
             }
-            return new Invocation(CapturedOutput(), cancellationToken.IsCancellationRequested
+            DrainOutput();
+            return new Invocation(retained, cancellationToken.IsCancellationRequested
                 ? InvocationOutcome.Cancelled
-                : shell.HadErrors ? InvocationOutcome.CompletedWithErrors : InvocationOutcome.Completed);
+                : diagnostics.ErrorCount > 0 || shell.HadErrors ? InvocationOutcome.CompletedWithErrors : InvocationOutcome.Completed);
         }
         catch (OperationCanceledException)
         {
-            return new Invocation(CapturedOutput(), InvocationOutcome.Cancelled);
+            DrainOutput();
+            return new Invocation(retained, InvocationOutcome.Cancelled);
         }
         catch (PipelineStoppedException exception)
         {
-            if (!cancellationToken.IsCancellationRequested)
-                diagnostics.Enqueue(Diagnostic("Error", exception.Message));
-            return new Invocation(CapturedOutput(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
+            if (!cancellationToken.IsCancellationRequested && !capture.LimitReached)
+                diagnostics.Add(Diagnostic("Error", exception.Message));
+            DrainOutput();
+            return new Invocation(retained, cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
         }
         catch (RuntimeException exception)
         {
-            if (!diagnostics.Any(record => record.Stream == "Error" && record.Message == exception.Message))
-                diagnostics.Enqueue(Diagnostic("Error", exception.Message));
-            return new Invocation(CapturedOutput(), cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
+            if (!diagnostics.Snapshot().Any(record => record.Stream == "Error" && record.Message == exception.Message))
+                diagnostics.Add(Diagnostic("Error", exception.Message));
+            DrainOutput();
+            return new Invocation(retained, cancellationToken.IsCancellationRequested ? InvocationOutcome.Cancelled : InvocationOutcome.Failed);
         }
+        finally
+        {
+            output.DataAdded -= outputAdded;
+            foreach (var detach in unsubscribe) detach();
+            capture.RequestStop = null;
+        }
+    }
+
+    private static void DisposeOutput(IEnumerable<PSObject> output)
+    {
+        foreach (var value in output.Select(value => value.BaseObject).Distinct(ReferenceEqualityComparer.Instance))
+            if (value is IDisposable disposable) disposable.Dispose();
     }
 
     private void ConfigureShouldProcess(AutomationShell shell, IReadOnlyDictionary<string, string> parameters)
@@ -773,7 +877,9 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     {
         if (result.Outcome == InvocationOutcome.Cancelled) throw new OperationCanceledException("The session operation was cancelled.");
         if (result.Outcome != InvocationOutcome.Completed)
-            throw new InvalidOperationException(string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+            throw new InvalidOperationException($"{result.Outcome}: " +
+                string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => diagnostic.Message)
+                    .Append(result.RetentionNotice ?? string.Empty)));
     }
 
     private static string ActionDescription(ConsoleActionId action, IReadOnlyDictionary<string, string> parameters,
@@ -859,7 +965,25 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
     private sealed record Invocation(IReadOnlyList<PSObject> Output, InvocationOutcome Outcome);
     private sealed record ProcessIdentity(int Id, DateTime StartTime);
     private sealed record LiveRow(PSObject Value, string? Name, ProcessIdentity? Identity, string? IdentityError);
-    private sealed class DisplayFailures(ConcurrentQueue<DiagnosticRecord> diagnostics)
+    private sealed class InvocationCapture(Stopwatch stopwatch)
+    {
+        public Stopwatch Stopwatch { get; } = stopwatch;
+        public TimeSpan? FirstOutputLatency { get; set; }
+        public long OutputReceived { get; set; }
+        public int PeakOutputBuffer { get; set; }
+        public HashSet<object> RetainedObjects { get; } = new(ReferenceEqualityComparer.Instance);
+        public bool LimitReached { get; private set; }
+        public string? LimitReason { get; private set; }
+        public Action? RequestStop { get; set; }
+
+        public void StopForLimit(string reason)
+        {
+            LimitReached = true;
+            LimitReason ??= reason;
+            RequestStop?.Invoke();
+        }
+    }
+    private sealed class DisplayFailures(DiagnosticBuffer diagnostics)
     {
         private const int Limit = 20;
         public int Count { get; private set; }
@@ -868,13 +992,13 @@ public sealed class PowerShellSession : IConsoleSession, IInvocationHostSession
         {
             Count++;
             if (Count <= Limit)
-                diagnostics.Enqueue(Diagnostic("Error", $"Display property '{property}' failed on row {rowNumber}: {PropertyError(exception)}"));
+                diagnostics.Add(Diagnostic("Error", $"Display property '{property}' failed on row {rowNumber}: {PropertyError(exception)}"));
         }
 
         public void Summarize()
         {
             if (Count > Limit)
-                diagnostics.Enqueue(Diagnostic("Error", $"Display property evaluation failed {Count} times; first {Limit} failures shown, {Count - Limit} additional failures omitted. Individual cells retain their errors."));
+                diagnostics.Add(Diagnostic("Error", $"Display property evaluation failed {Count} times; first {Limit} failures shown, {Count - Limit} additional failures omitted. Individual cells retain their errors."));
         }
     }
     private sealed class DefaultRunspaceScope : IDisposable

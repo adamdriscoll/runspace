@@ -91,6 +91,8 @@ Select one or multiple rows to see applicable operations. The Actions pane and r
 
 Provider-tree expansion loads only that location's containers, not their descendants. Flat providers such as Environment, Alias, Variable, and Function still display their items in Results without invented child containers or mutation actions. Use the built-in **Environment** view to edit environment variables. Failed expansion remains retryable; partial expansion keeps usable children and shows an incomplete-navigation warning. Collapse and expand to retry.
 
+The tree loads at most 200 children per location and 1,000 nodes overall. Omitted paths get a visible limit notice; collapse a provider/registry branch to unload it, or use a literal Location to browse an omitted path. Back/Forward retains the latest 100 routes and **requeries**, rather than caching the old objects.
+
 | Shortcut | Operation |
 | --- | --- |
 | F5 | Refresh the active resource |
@@ -127,6 +129,12 @@ Completed, completed-with-errors, failed, and cancelled outcomes remain distinct
 **PowerShell History** records command representations, timing, and outcomes. Selected-object actions may depend on retained objects in the live session, so history is not an arbitrary replay engine. The latest 200 invocations are retained in memory.
 
 **Diagnostics** displays execution messages and errors separately from history. A query can return useful objects and still report errors; an empty successful query is different from a failed query.
+
+Results retain at most **25,000 objects per invocation**. Producing an excess object or reaching 1,000 errors requests cooperative stop and shows a Failed/incomplete-result retention notice; a user-requested stop remains Cancelled. The adapter allows four nonempty live result sets and visibly rejects/releases new output when that budget is full, without invalidating existing handles. Mutations may already have left side effects even if result admission fails. The desktop retains one current result and no related-result cache.
+
+Diagnostics keeps the latest 2,000 ordinary records, a separate latest-1,000 error tail, and one latest progress update. Messages and history command text are shortened after 16,384 characters. Eviction, coalescing and shortening are visible and do not turn an error outcome into success. These are bounded transcripts, not complete file logging.
+
+**Export table...** saves only retained, filtered visible rows; clear the filter to export every retained row before leaving the view. Copy diagnostic/history text into a file before eviction or close. Recover complete read-only output by deliberately querying a narrower scope or using a separate PowerShell with file-directed export/logging; do not automatically replay mutations, redacted history or interactive input. See [measured responsiveness and the full retention policy](result-performance.md).
 
 Interactive host input is not recorded and its history is labeled **Non-replayable**. Credentials and secure values are disposed after execution, and password editors are cleared when their prompt closes. Because scripts can echo or embed secrets in arbitrary objects, an invocation using credential/secure host input does not retain returned objects and redacts all textual diagnostics and its command representation. This conservative policy is visible in Diagnostics; it is not a security sandbox or a guarantee that arbitrary PowerShell scripts cannot keep or disclose their own copies.
 

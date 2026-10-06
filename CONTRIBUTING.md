@@ -48,6 +48,8 @@ Add regression coverage for behavior changes. Use original fixture objects, uniq
 
 Desktop tests use Skia software rendering as well as headless input. Minimal Linux SDK containers need `libfontconfig1` and `fonts-dejavu-core`; no display server is needed for these tests. Set `RUNSPACE_UI_CAPTURE_DIR` to a scratch output directory to retain benign fixture PNGs and size/scale/row-count JSON. See [shell validation](docs/shell-validation.md) for the exact capture gate and its limits.
 
+Result/stream/navigation limits have focused regression coverage in `RetentionTests`. Run the reference-hardware Release responsiveness gate with `pwsh -NoProfile -File .\scripts\Measure-Results.ps1 -Results .\artifacts\result-benchmarks`. It records the 20,000-row/ten-scalar fixture, native/headless selection and scrolling, engine-first-output, managed retention, flood buffer depth and cooperative cancellation. See [measurement methods, reference results and policy](docs/result-performance.md); use `-SkipNative` only when a graphical session is unavailable.
+
 Nullable analysis and warnings-as-errors are enabled in `Directory.Build.props`. Preserve typed values, fixed object selection, literal parameter binding, and explicit failure/partial/cancelled states. Never evaluate arbitrary object getters on the UI thread, hide execution failures as empty successes, or store secrets in history or settings.
 
 ## Publish and CI

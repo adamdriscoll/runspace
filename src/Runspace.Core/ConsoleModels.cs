@@ -77,7 +77,12 @@ public sealed record ConsoleResult(
     IReadOnlyList<DiagnosticRecord> Diagnostics,
     TimeSpan Duration,
     InvocationOutcome Outcome,
-    bool OutputSuppressed = false);
+    bool OutputSuppressed = false,
+    string? RetentionNotice = null,
+    InvocationMeasurements? Measurements = null);
+
+public sealed record InvocationMeasurements(TimeSpan? FirstOutputLatency, long OutputReceived,
+    int PeakOutputBuffer, long DiagnosticsReceived, int PeakDiagnosticBuffer);
 
 public enum ConsoleActionId
 {
