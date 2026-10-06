@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using Runspace.Core;
 using Runspace.PowerShell;
 
@@ -498,8 +499,16 @@ public sealed class PowerShellSessionTests
     {
         await using var session = new PowerShellSession();
         var properties = await session.QueryAsync(Node(ResourceKind.NetworkProperties));
+        string[] expectedColumns = OperatingSystem.IsWindows()
+            ? ["HostName", "DomainName", "DhcpScopeName", "IsWinsProxy", "NodeType"]
+            : ["HostName", "DomainName", "NodeType"];
+        Assert.Equal(expectedColumns, properties.Columns.Select(column => column.Key));
         AssertCompleted(properties);
-        Assert.Single(properties.Rows);
+        var row = Assert.Single(properties.Rows);
+        Assert.All(row.Cells.Values, cell => Assert.Null(cell.Error));
+        var nativeProperties = IPGlobalProperties.GetIPGlobalProperties();
+        Assert.Equal(nativeProperties.HostName, row.Cells["HostName"].Value);
+        Assert.Equal(nativeProperties.DomainName, row.Cells["DomainName"].Value);
         AssertCompleted(await session.QueryAsync(Node(ResourceKind.NetworkInterfaces)));
         if (!OperatingSystem.IsWindows())
         {

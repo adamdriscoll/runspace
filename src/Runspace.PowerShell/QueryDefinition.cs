@@ -20,7 +20,9 @@ internal sealed record QueryDefinition(
             [Date("TimeCreated"), Number("Id"), Text("LevelDisplayName"), Text("ProviderName", 240), Text("Message", 450)],
             ("LogName", Path(node)), ("MaxEvents", 200)),
         ResourceKind.NetworkProperties => Native("[System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties()",
-            [Text("HostName"), Text("DomainName"), Text("DhcpScopeName"), Boolean("IsWinsProxy"), Text("NodeType")]),
+            OperatingSystem.IsWindows()
+                ? [Text("HostName"), Text("DomainName"), Text("DhcpScopeName"), Boolean("IsWinsProxy"), Text("NodeType")]
+                : [Text("HostName"), Text("DomainName"), Text("NodeType")]),
         ResourceKind.NetworkInterfaces => Native("[System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()",
             [Text("Name", 240), Text("Description", 320), Text("NetworkInterfaceType"), Text("OperationalStatus"),
                 Number("Speed"), Text("MAC"), Text("Addresses", 350)]),

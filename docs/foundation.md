@@ -43,6 +43,8 @@ All actual PowerShell providers/drives are discovered in the embedded session. A
 
 Local-system domain queries are built in. Windows CIM, service, event-log, registry, and account views depend on the target OS, available modules, and permissions; failures are displayed. Managed Computers currently describes the local computer only. Hyper-V, domain modules, and remote-target management are not implemented.
 
+Network Configuration uses real local network objects on all platforms. Its result table includes DHCP scope and WINS proxy fields only on Windows, where those property getters are supported.
+
 The shell has splitters and tabs rather than a floating dock manager. CSV export is supported; legacy XML/HTML reporting and charts are not. Layout stores only window/pane sizes, not arbitrary live session state or credentials.
 
 Mutating actions bind parameters and act on fixed selected handles. UI confirmation does not grant elevated rights. Cancellation is cooperative, and a refreshed table after partial errors is not reported as proof that every action succeeded.
