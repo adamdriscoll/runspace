@@ -4,6 +4,8 @@ A .NET 10 / PowerShell 7 / Avalonia administration console inspired by PowerGUI.
 
 The foundation is a native desktop application, not a terminal wrapper: navigation tree on the left, typed object tables in the center, grouped contextual actions on the right, and PowerShell history/diagnostics. This iteration uses **built-in views only**. Console Kits, third-party extensions, and an installer are out of scope.
 
+![Runspace on Windows showing the navigation tree, Services result table, and contextual actions](docs/images/runspace.png)
+
 ## Build and launch
 
 Install the **.NET 10 SDK**. `global.json` pins 10.0.401, and NuGet package lock files pin the dependency graph. An external PowerShell installation is not required for the embedded engine.
