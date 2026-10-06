@@ -363,6 +363,44 @@ public sealed class InvocationHostTests(ITestOutputHelper output)
             Assert.True(child.WaitForExit(5_000));
             Assert.Contains(child.Id.ToString(), result.Script);
             Assert.Contains("Non-replayable", result.Script);
+            using var replacement = Process.Start(start)!;
+            try
+            {
+                var prompts = 0;
+                session.PromptHandler = (_, _) =>
+                {
+                    prompts++;
+                    return Task.FromResult<HostResponse?>(null);
+                };
+                foreach (var action in new[]
+                {
+                    ConsoleActionId.StopProcess, ConsoleActionId.ProcessModules, ConsoleActionId.ProcessThreads,
+                    ConsoleActionId.SetProcessPriority
+                })
+                {
+                    if (action == ConsoleActionId.SetProcessPriority && !OperatingSystem.IsWindows()) continue;
+                    var stale = await session.ExecuteAsync(action, processes.Id, [original.Handle],
+                        new Dictionary<string, string> { ["Confirm"] = "True", ["Priority"] = "Normal" });
+                    Assert.Equal(InvocationOutcome.Failed, stale.Outcome);
+                    Assert.Empty(stale.Rows);
+                    Assert.Contains(stale.Diagnostics, record => record.Stream == "Error" && record.Message.Contains("exited"));
+                    Assert.Contains(child.Id.ToString(), stale.Script);
+                    Assert.False(replacement.HasExited);
+                }
+                var refreshed = await session.QueryAsync(BuiltInCatalog.LocalSystem.Single(node => node.Kind == ResourceKind.Processes));
+                Assert.Contains(refreshed.Rows, row => Equals(row.Cells["Id"].Value, replacement.Id));
+                Assert.DoesNotContain(refreshed.Rows, row => row.Handle == original.Handle);
+                var mismatched = await session.ExecuteAsync(ConsoleActionId.StopProcess, refreshed.Id, [original.Handle],
+                    new Dictionary<string, string> { ["Confirm"] = "True" });
+                Assert.Equal(InvocationOutcome.Failed, mismatched.Outcome);
+                Assert.Contains(mismatched.Diagnostics, record => record.Message.Contains("stale"));
+                Assert.Equal(0, prompts);
+                Assert.False(replacement.HasExited);
+            }
+            finally
+            {
+                if (!replacement.HasExited) { replacement.Kill(entireProcessTree: true); replacement.WaitForExit(); }
+            }
             Completed(await session.QueryAsync(Providers));
         }
         finally
