@@ -32,15 +32,18 @@ internal static class PowerShellPayload
 
     internal static void Validate(string baseDirectory, bool windows)
     {
-        var missing = RequiredFiles(windows).Where(file =>
-            !File.Exists(Path.Combine(baseDirectory, file))
-            && !File.Exists(Path.Combine(baseDirectory, "runtimes", windows ? "win" : "unix", "lib", "net10.0", file))
-            && !File.Exists(Path.Combine(baseDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "lib", "netstandard1.6", file))
-            && !File.Exists(Path.Combine(baseDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "native", file))).ToArray();
+        var missing = RequiredFiles(windows).Where(file => !AssetExists(baseDirectory, file, windows)).ToArray();
         if (missing.Length > 0)
             throw new InvalidOperationException(
                 $"The embedded PowerShell payload is incomplete in '{baseDirectory}'. Missing: {string.Join(", ", missing)}. " +
                 "Extract the entire matching runspace-<rid> artifact again, including the runtimes directory. " +
                 "Installing PowerShell or changing PSModulePath does not repair this application payload.");
     }
+
+    internal static bool AssetExists(string baseDirectory, string file, bool windows) =>
+        File.Exists(Path.Combine(baseDirectory, file))
+        || File.Exists(Path.Combine(baseDirectory, "runtimes", windows ? "win" : "unix", "lib", "net10.0", file))
+        || File.Exists(Path.Combine(baseDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "lib", "netstandard1.6", file))
+        || File.Exists(Path.Combine(baseDirectory, "runtimes", RuntimeInformation.RuntimeIdentifier, "native", file))
+        || (file == "libpsl-native.dylib" && File.Exists(Path.Combine(baseDirectory, "runtimes", "osx", "native", file)));
 }

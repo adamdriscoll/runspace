@@ -19,6 +19,30 @@ public sealed class PublishValidationTests
     }
 
     [Fact]
+    public void RecognizesUniversalMacOsNativeAssetWithoutAcceptingMissingFiles()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "runspace-assets-" + Guid.NewGuid().ToString("N"));
+        var nativeDirectory = Path.Combine(directory, "runtimes", "osx", "native");
+        Directory.CreateDirectory(nativeDirectory);
+        var file = Path.Combine(nativeDirectory, "libpsl-native.dylib");
+        try
+        {
+            Assert.False(PowerShellPayload.AssetExists(directory, "libpsl-native.dylib", windows: false));
+            File.WriteAllText(file, "asset fixture");
+            Assert.True(PowerShellPayload.AssetExists(directory, "libpsl-native.dylib", windows: false));
+            Assert.False(PowerShellPayload.AssetExists(directory, "libpsl-native.so", windows: false));
+        }
+        finally
+        {
+            File.Delete(file);
+            Directory.Delete(nativeDirectory);
+            Directory.Delete(Path.GetDirectoryName(nativeDirectory)!);
+            Directory.Delete(Path.Combine(directory, "runtimes"));
+            Directory.Delete(directory);
+        }
+    }
+
+    [Fact]
     public async Task PublishedProbeExercisesActualEmbeddedRuntime()
     {
         var probe = new PublishedRuntimeProbe();
