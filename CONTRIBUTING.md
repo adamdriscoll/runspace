@@ -26,9 +26,9 @@ Open the repository folder, install the recommended C# extension, and press **F5
 
 | Project | Responsibility |
 | --- | --- |
-| `src\Runspace.Core` | Resource/action definitions, cached display cells, typed filtering and sorting |
+| `src\Runspace.Core` | Resource/action definitions, cached display cells, typed filtering/sorting, validated versioned workspace storage |
 | `src\Runspace.PowerShell` | Local session, serialized execution, live object ownership, provider/CIM operations, streams and cancellation |
-| `src\Runspace.Desktop` | Avalonia shell, dialogs, history, diagnostics, clipboard/CSV, and layout |
+| `src\Runspace.Desktop` | Avalonia shell, dialogs, history, diagnostics, clipboard/CSV, and workspace preferences/recovery |
 | `tests\Runspace.Tests` | Core behavior and real embedded-runtime tests |
 | `tests\Runspace.Desktop.Tests` | Headless Avalonia interaction tests through a fixture session |
 

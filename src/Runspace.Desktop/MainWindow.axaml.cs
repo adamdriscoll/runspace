@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.ComponentModel;
 using System.Text;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Automation;
@@ -43,17 +42,18 @@ public partial class MainWindow : Window
     private long _generation;
     private int _historyPosition = -1;
     private bool _closing;
+    private bool _confirmingClose;
     private bool _readyToClose;
     private bool _changingRows;
-    private bool _layoutReadFailed;
-    private readonly bool _persistLayout;
+    internal bool IsSessionReady { get; private set; }
 
     public MainWindow() : this(null, true) { }
 
-    public MainWindow(IConsoleSession? session, bool persistLayout = false)
+    public MainWindow(IConsoleSession? session, bool persistLayout = false, WorkspaceStore? workspaceStore = null)
     {
         _session = session;
-        _persistLayout = persistLayout;
+        _workspaceStore = workspaceStore ?? (persistLayout ? new WorkspaceStore(new FileWorkspaceStorage(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Runspace"))) : null);
         InitializeComponent();
         DataContext = _model;
         BuildNavigation();
@@ -62,6 +62,14 @@ public partial class MainWindow : Window
         ResultsGrid.AddHandler(KeyUpEvent, ResultKeyUp, RoutingStrategies.Tunnel);
         Opened += async (_, _) => await SafeAsync(InitializeAsync);
         Closing += OnClosing;
+        SizeChanged += (_, _) =>
+        {
+            if (WindowState == WindowState.Normal) _normalSize = new Size(Width, Height);
+        };
+        PositionChanged += (_, _) =>
+        {
+            if (WindowState == WindowState.Normal) _normalPosition = Position;
+        };
         AddHandler(KeyDownEvent, WindowKeyDown, RoutingStrategies.Tunnel);
         UpdateNavigationButtons();
     }
@@ -87,7 +95,8 @@ public partial class MainWindow : Window
         local.Children.Insert(3, network);
         local.Children.Insert(7, accounts);
         _drivesRoot = Folder("provider-drives", "PowerShell Drives");
-        _drivesRoot.IsExpanded = true;
+        _drivesRoot.IsLazy = true;
+        _drivesRoot.Children.Add(new(new("loading", "Expand to discover session drives...", ResourceKind.Overview, string.Empty)));
         _model.Roots.Add(local);
         var networkRoot = Folder("network-root", "Network");
         networkRoot.Children.Add(new(new("managed-computers", "Managed Computers", ResourceKind.ManagedComputers,
@@ -98,12 +107,7 @@ public partial class MainWindow : Window
 
     private async Task InitializeAsync()
     {
-        try { if (_persistLayout) LoadLayout(); }
-        catch (Exception exception) when (exception is IOException or JsonException)
-        {
-            _layoutReadFailed = true;
-            ReportError(exception);
-        }
+        LoadWorkspace();
         _model.IsBusy = true;
         _session ??= await Task.Run<IConsoleSession>(() => new PowerShellSession(), _lifetime.Token);
         if (_session is IInvocationHostSession interactive)
@@ -111,9 +115,10 @@ public partial class MainWindow : Window
             interactive.StateChanged += InvocationStateChanged;
         }
         _model.Runtime = $"Local / PowerShell {_session.RuntimeVersion}";
-        await RefreshDrivesAsync();
         _model.IsBusy = false;
-        NavigationTree.SelectedItem = _model.Roots[0].Children.First(item => item.Node.Kind == ResourceKind.Processes);
+        IsSessionReady = true;
+        _model.Status = "Ready. Choose a resource or explicitly open the saved resource; no query has run.";
+        UpdateWorkspaceNotice();
     }
 
     private IConsoleSession Session => _session ?? throw new InvalidOperationException("PowerShell is not ready. Check Diagnostics for startup errors.");
@@ -169,6 +174,7 @@ public partial class MainWindow : Window
         _drivesRoot.Children.Clear();
         foreach (var node in nodes)
             _drivesRoot.Children.Add(new(node, true));
+        _drivesRoot.IsLazy = false;
     }
 
     private async void NavigationChanged(object? sender, SelectionChangedEventArgs e)
@@ -186,6 +192,12 @@ public partial class MainWindow : Window
             item.IsLoading = true;
             try
             {
+                if (!IsSessionReady) throw new InvalidOperationException("Wait for PowerShell to initialize before expanding resources.");
+                if (item == _drivesRoot)
+                {
+                    await RefreshDrivesAsync();
+                    return;
+                }
                 var generation = _generation;
                 BindHostPrompt(_generation, _lifetime.Token);
                 var result = await Session.QueryAsync(item.Node, _lifetime.Token);
@@ -230,6 +242,7 @@ public partial class MainWindow : Window
     private async Task NavigateAsync(ConsoleNode node, bool addHistory = true)
     {
         if (_closing) return;
+        CaptureViewPreferences();
         _navigationWarning = null;
         var generation = ++_generation;
         _active?.Cancel();
@@ -243,8 +256,6 @@ public partial class MainWindow : Window
         GoButton.IsVisible = LocationBox.IsVisible;
         Breadcrumb.IsVisible = !LocationBox.IsVisible;
         DocumentTabs.SelectedIndex = 0;
-        _appliedFilter = string.Empty;
-        FilterBox.Text = string.Empty;
         if (addHistory)
         {
             if (_historyPosition < _navigationHistory.Count - 1)
@@ -354,6 +365,10 @@ public partial class MainWindow : Window
         {
             _columns = columns;
             _rows = rows;
+            _displayedReference = StableReference(_currentNode);
+            _view = null;
+            _appliedFilter = string.Empty;
+            FilterBox.Text = string.Empty;
             ResultsGrid.SelectedItems.Clear();
             ResultsGrid.Columns.Clear();
             foreach (var column in columns)
@@ -383,6 +398,7 @@ public partial class MainWindow : Window
             }
             _view = new DataGridCollectionView(rows) { Filter = MatchesFilter };
             ResultsGrid.ItemsSource = _view;
+            ApplyViewPreferences();
         }
         finally { _changingRows = false; }
         UpdateCounts();
@@ -585,6 +601,7 @@ public partial class MainWindow : Window
                             break;
                         case ActionResultPolicy.Replace:
                         case ActionResultPolicy.Related:
+                            CaptureViewPreferences();
                             if (action.ResultPolicy == ActionResultPolicy.Related && rows.Count == 1)
                             {
                                 var kind = action.Id == ConsoleActionId.ProcessModules ? ResourceKind.ProcessModules : ResourceKind.ProcessThreads;
@@ -859,41 +876,33 @@ public partial class MainWindow : Window
         _result = null;
     }
 
-    private static string LayoutPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Runspace", "layout.json");
-    private sealed record Layout(double Width, double Height, double Left, double Right);
-
-    private void LoadLayout()
-    {
-        if (!File.Exists(LayoutPath)) return;
-        var layout = JsonSerializer.Deserialize<Layout>(File.ReadAllText(LayoutPath)) ?? throw new InvalidDataException("The saved layout is empty. Remove layout.json to reset it.");
-        if (!double.IsFinite(layout.Width) || !double.IsFinite(layout.Height) || !double.IsFinite(layout.Left) || !double.IsFinite(layout.Right))
-            throw new InvalidDataException("The saved layout contains invalid dimensions.");
-        Width = Math.Clamp(layout.Width, 900, 2000);
-        Height = Math.Clamp(layout.Height, 600, 1400);
-        WorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(Math.Clamp(layout.Left, 160, 350));
-        WorkspaceGrid.ColumnDefinitions[4].Width = new GridLength(Math.Clamp(layout.Right, 180, 350));
-    }
-
-    private void SaveLayout()
-    {
-        if (!_persistLayout || _layoutReadFailed) return;
-        var directory = Path.GetDirectoryName(LayoutPath)!;
-        Directory.CreateDirectory(directory);
-        var temporary = LayoutPath + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(new Layout(Width, Height,
-            WorkspaceGrid.ColumnDefinitions[0].ActualWidth, WorkspaceGrid.ColumnDefinitions[4].ActualWidth)));
-        File.Move(temporary, LayoutPath, true);
-    }
-
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
         if (_readyToClose) return;
         e.Cancel = true;
-        if (_closing) return;
+        if (_closing || _confirmingClose) return;
+        try { SaveWorkspace(); }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            ReportError(exception);
+            _confirmingClose = true;
+            bool closeWithoutSaving;
+            try
+            {
+                closeWithoutSaving = await Dialogs.ConfirmAsync(this, "Workspace was not saved",
+                    $"{exception.Message}\n\nClose without saving? Cancel keeps the window open so you can recover or retry.",
+                    acceptLabel: "Close without saving");
+            }
+            finally { _confirmingClose = false; }
+            if (!closeWithoutSaving)
+            {
+                _model.Status = "Workspace was not saved. Window remains open; repair storage and retry.";
+                return;
+            }
+        }
         _closing = true;
         _lifetime.Cancel();
         _active?.Cancel();
-        await SafeAsync(() => { SaveLayout(); return Task.CompletedTask; });
         await SafeAsync(async () =>
         {
             ReleaseCurrentResult();
@@ -944,14 +953,15 @@ public partial class MainWindow : Window
     private void HighContrastClick(object? sender, RoutedEventArgs e) =>
         RequestedThemeVariant = HighContrastMenu.IsChecked ? App.HighContrastTheme : ThemeVariant.Light;
     private void ExitClick(object? sender, RoutedEventArgs e) => Close();
-    private void ResetLayoutClick(object? sender, RoutedEventArgs e)
+    private async void ResetLayoutClick(object? sender, RoutedEventArgs e) => await WorkspaceOperationAsync(() =>
     {
-        WorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(220);
-        WorkspaceGrid.ColumnDefinitions[4].Width = new GridLength(220);
-        WorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
-        DiagnosticsPane.IsVisible = false;
-        _layoutReadFailed = false;
-    }
+        _workspace = _workspace with { Layout = new() };
+        WindowState = WindowState.Normal;
+        ApplyWorkspaceLayout();
+        SaveWorkspace();
+        UpdateWorkspaceNotice();
+        return Task.CompletedTask;
+    });
     private async void ProvidersClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => NavigateAsync(BuiltInCatalog.LocalSystem.First(node => node.Kind == ResourceKind.Providers)));
     private async void GoToPathClick(object? sender, RoutedEventArgs e) => await SafeAsync(async () =>
     {
