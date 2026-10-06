@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Collections;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
@@ -12,6 +13,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Runspace.Core;
@@ -56,9 +58,11 @@ public partial class MainWindow : Window
         DataContext = _model;
         BuildNavigation();
         NavigationTree.AddHandler(TreeViewItem.ExpandedEvent, Expanded);
+        ResultsGrid.AddHandler(KeyDownEvent, ResultKeyDown, RoutingStrategies.Tunnel);
+        ResultsGrid.AddHandler(KeyUpEvent, ResultKeyUp, RoutingStrategies.Tunnel);
         Opened += async (_, _) => await SafeAsync(InitializeAsync);
         Closing += OnClosing;
-        KeyDown += WindowKeyDown;
+        AddHandler(KeyDownEvent, WindowKeyDown, RoutingStrategies.Tunnel);
         UpdateNavigationButtons();
     }
 
@@ -394,7 +398,8 @@ public partial class MainWindow : Window
         var filter = FilterBox.Text ?? string.Empty;
         if (filter == _appliedFilter) return;
         _appliedFilter = filter;
-        var hadSelection = ResultsGrid.SelectedItems.Count > 0;
+        var selection = SelectedRows();
+        var retained = selection.Where(MatchesFilter).ToArray();
         _changingRows = true;
         try
         {
@@ -402,11 +407,14 @@ public partial class MainWindow : Window
             _view.MoveCurrentToPosition(-1);
             ResultsGrid.SelectedItems.Clear();
             ResultsGrid.SelectedItem = null;
+            foreach (var row in retained) ResultsGrid.SelectedItems.Add(row);
         }
         finally { _changingRows = false; }
         UpdateCounts();
         UpdateActions();
-        if (hadSelection && !_model.IsBusy) _model.Status = "Selection cleared because the displayed filter changed.";
+        var removed = selection.Count - retained.Length;
+        if (removed > 0 && !_model.IsBusy)
+            _model.Status = $"Filter hid {removed:N0} selected object(s); hidden selection cleared.";
     }
 
     private IReadOnlyList<ConsoleRow> SelectedRows() => ResultsGrid.SelectedItems.Cast<ConsoleRow>().ToArray();
@@ -447,15 +455,19 @@ public partial class MainWindow : Window
             _ => 1
         }))
         {
-            ActionsPanel.Children.Add(new Border
+            var header = new Border
             {
-                Background = Brush.Parse("#F1F1F1"), Padding = new Thickness(10, 5), Margin = new Thickness(0, 4, 0, 1),
-                Child = new TextBlock { Text = group.Key, FontWeight = FontWeight.SemiBold, Foreground = Brush.Parse("#365875") }
-            });
+                Padding = new Thickness(10, 5), Margin = new Thickness(0, 4, 0, 1),
+                Child = new TextBlock { Text = group.Key, FontWeight = FontWeight.SemiBold }
+            };
+            header.Bind(Border.BackgroundProperty, this.GetResourceObservable("ConsoleChrome"));
+            ActionsPanel.Children.Add(header);
             foreach (var action in group)
             {
                 var button = new Button { Content = ActionContent(action), Tag = action.Id, IsEnabled = action.IsEnabled };
-                Avalonia.Automation.AutomationProperties.SetName(button, action.Name);
+                AutomationProperties.SetName(button, action.Name);
+                AutomationProperties.SetHelpText(button, action.Description + (action.IsEnabled ? string.Empty :
+                    " Unavailable for the current selection, resource, platform, or pending operation."));
                 button.Classes.Add("action");
                 ToolTip.SetTip(button, action.Description);
                 button.Click += async (_, _) => await SafeAsync(() => InvokeActionAsync(action));
@@ -471,12 +483,15 @@ public partial class MainWindow : Window
         var icon = new Avalonia.Controls.Shapes.Path
         {
             Width = 12, Height = 12, Stretch = Stretch.Uniform,
-            Fill = stop ? Brush.Parse("#C52D29") : start ? Brush.Parse("#42A447") : Brush.Parse("#477CAA"),
             Data = Geometry.Parse(start ? "M2,1 L12,7 L2,13 Z" : stop ? "M2,2 L12,2 L12,12 L2,12 Z" : "M1,1 L10,1 L13,4 L13,13 L1,13 Z")
         };
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+        icon.Bind(Avalonia.Controls.Shapes.Shape.FillProperty, icon.GetResourceObservable("ConsoleAccent"));
+        var panel = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
         panel.Children.Add(icon);
-        panel.Children.Add(new TextBlock { Text = action.Name, VerticalAlignment = VerticalAlignment.Center });
+        var label = new TextBlock { Text = action.Name, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(7, 0, 0, 0), TextWrapping = TextWrapping.Wrap };
+        Grid.SetColumn(label, 1);
+        panel.Children.Add(label);
         return panel;
     }
 
@@ -711,10 +726,17 @@ public partial class MainWindow : Window
 
     private void ContextMenuOpening(object? sender, CancelEventArgs e)
     {
+        ResultContextMenu.Placement = PlacementMode.Pointer;
+        PopulateContextMenu();
+    }
+
+    private void PopulateContextMenu()
+    {
         var items = new List<MenuItem>();
         foreach (var action in CurrentActions())
         {
-            var item = new MenuItem { Header = action.Name, IsEnabled = action.IsEnabled };
+            var item = new MenuItem { Header = action.Name, Tag = action.Id, IsEnabled = action.IsEnabled };
+            AutomationProperties.SetHelpText(item, action.Description);
             item.Click += async (_, _) => await SafeAsync(() => InvokeActionAsync(action));
             items.Add(item);
         }
@@ -748,7 +770,16 @@ public partial class MainWindow : Window
 
     private async void ResultKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter) { e.Handled = true; await SafeAsync(DefaultActionAsync); }
+        if (e.Key == Key.Apps || e.Key == Key.F10 && e.KeyModifiers == KeyModifiers.Shift)
+        {
+            e.Handled = true;
+        }
+        else if (e.Key == Key.A && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
+        {
+            e.Handled = true;
+            ResultsGrid.SelectAll();
+        }
+        else if (e.Key == Key.Enter) { e.Handled = true; await SafeAsync(DefaultActionAsync); }
         else if (e.Key == Key.C && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
         {
             e.Handled = true;
@@ -757,11 +788,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ResultKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Apps && !(e.Key == Key.F10 && e.KeyModifiers == KeyModifiers.Shift)) return;
+        e.Handled = true;
+        PopulateContextMenu();
+        // Avalonia dismisses an open context menu on the opening gesture's key-up.
+        ResultContextMenu.Placement = PlacementMode.Bottom;
+        ResultContextMenu.Open(ResultsGrid);
+    }
+
     private async void WindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F5) { e.Handled = true; await SafeAsync(RefreshAsync); }
         else if (e.Key == Key.F && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
-        { e.Handled = true; FilterBox.Focus(); }
+        { e.Handled = true; DocumentTabs.SelectedIndex = 0; FilterBox.Focus(); }
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Left or Key.Right)
         { e.Handled = true; await SafeAsync(() => MoveHistoryAsync(e.Key == Key.Left ? -1 : 1)); }
     }
@@ -900,11 +941,14 @@ public partial class MainWindow : Window
     private void HistoryClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedIndex = 1;
     private void DiagnosticsClick(object? sender, RoutedEventArgs e) => DiagnosticsPane.IsVisible = !DiagnosticsPane.IsVisible;
     private void HideDiagnosticsClick(object? sender, RoutedEventArgs e) => DiagnosticsPane.IsVisible = false;
+    private void HighContrastClick(object? sender, RoutedEventArgs e) =>
+        RequestedThemeVariant = HighContrastMenu.IsChecked ? App.HighContrastTheme : ThemeVariant.Light;
     private void ExitClick(object? sender, RoutedEventArgs e) => Close();
     private void ResetLayoutClick(object? sender, RoutedEventArgs e)
     {
         WorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(220);
         WorkspaceGrid.ColumnDefinitions[4].Width = new GridLength(220);
+        WorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
         DiagnosticsPane.IsVisible = false;
         _layoutReadFailed = false;
     }
@@ -929,20 +973,6 @@ public partial class MainWindow : Window
     });
     private async void AboutClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => Dialogs.MessageAsync(this, "About Runspace",
         $"Runspace Administration Console\n.NET 10 / Avalonia 12 / PowerShell {Session.RuntimeVersion}\n\nAn original, cross-platform console inspired by PowerGUI. Built-in administration only; no PowerPacks, installer, or copied PowerGUI code.\n\nWindows-only views require Windows. Operations use your current account's permissions."));
-    private async void ColumnsClick(object? sender, RoutedEventArgs e) => await SafeAsync(async () =>
-    {
-        var window = new Window { Title = "Visible columns", Width = 300, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 8 };
-        foreach (var column in ResultsGrid.Columns)
-        {
-            var check = new CheckBox { Content = column.Header, IsChecked = column.IsVisible };
-            check.IsCheckedChanged += (_, _) => column.IsVisible = check.IsChecked == true;
-            panel.Children.Add(check);
-        }
-        var close = new Button { Content = "Close", IsCancel = true, HorizontalAlignment = HorizontalAlignment.Right };
-        close.Click += (_, _) => window.Close();
-        panel.Children.Add(close);
-        window.Content = panel;
-        await window.ShowDialog(this);
-    });
+    private async void ColumnsClick(object? sender, RoutedEventArgs e) =>
+        await SafeAsync(() => Dialogs.ColumnsAsync(this, ResultsGrid, _columns));
 }

@@ -46,6 +46,8 @@ dotnet test Runspace.slnx
 
 Add regression coverage for behavior changes. Use original fixture objects, uniquely named temporary drives/directories, and disposable child processes. Tests must never perform destructive actions against arbitrary machine resources or require production credentials.
 
+Desktop tests use Skia software rendering as well as headless input. Minimal Linux SDK containers need `libfontconfig1` and `fonts-dejavu-core`; no display server is needed for these tests. Set `RUNSPACE_UI_CAPTURE_DIR` to a scratch output directory to retain benign fixture PNGs and size/scale/row-count JSON. See [shell validation](docs/shell-validation.md) for the exact capture gate and its limits.
+
 Nullable analysis and warnings-as-errors are enabled in `Directory.Build.props`. Preserve typed values, fixed object selection, literal parameter binding, and explicit failure/partial/cancelled states. Never evaluate arbitrary object getters on the UI thread, hide execution failures as empty successes, or store secrets in history or settings.
 
 ## Publish and CI
