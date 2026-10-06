@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Runspace.Core/Runspace.Core.csproj" />
+    <Project Path="src/Runspace.Desktop/Runspace.Desktop.csproj" />
+    <Project Path="src/Runspace.PowerShell/Runspace.PowerShell.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Runspace.Desktop.Tests/Runspace.Desktop.Tests.csproj" />
+    <Project Path="tests/Runspace.Tests/Runspace.Tests.csproj" />
+  </Folder>
+</Solution>

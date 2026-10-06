@@ -1,0 +1,50 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore Runspace.slnx --locked-mode --property:Configuration=Release
+      - name: Build
+        run: dotnet build Runspace.slnx --configuration Release --no-restore
+      - name: Test
+        run: dotnet test Runspace.slnx --configuration Release --no-build --logger "trx;LogFileName=results.trx"
+      - name: Publish console
+        run: dotnet publish src/Runspace.Desktop/Runspace.Desktop.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish
+      - name: Upload console
+        uses: actions/upload-artifact@v4
+        with:
+          name: runspace-${{ matrix.rid }}
+          path: artifacts/publish
+          if-no-files-found: error
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ matrix.rid }}
+          path: "**/TestResults/*.trx"
+          if-no-files-found: ignore
