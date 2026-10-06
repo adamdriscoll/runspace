@@ -16,6 +16,8 @@ The required runtime is .NET 10, with Microsoft.PowerShell.SDK 7.6.6 and Avaloni
 
 The PowerShell module owns live objects; desktop bindings use cached cells rather than invoking arbitrary getters. Invocation and object-inspection work is serialized in the owning session. Provider paths are passed as literal parameters, not interpolated into executable code.
 
+The [compact-shell acceptance record](shell-validation.md) retains this adapter decision, records original fixture renders at known client sizes/scales, and distinguishes automated keyboard/automation-peer checks from outstanding native DPI and screen-reader qualification.
+
 ## Actual PowerGUI reference run
 
 On 2026-10-05, the supplied installer was extracted as data into session artifacts. An original portable marker and the distribution's directory conventions were used to run the managed AdminConsole directly without installing PowerGUI.

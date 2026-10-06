@@ -83,7 +83,7 @@ A provider drive is a session resource root, not necessarily a physical disk. Fi
 
 ## Browse and inspect
 
-Select a resource in the navigation tree to load its objects. Filter the displayed table, click column headers to sort typed values, and drag or resize columns. **Columns...** controls column visibility.
+Select a resource in the navigation tree to load its objects. Filter the displayed table, click column headers to sort typed values, and drag or resize columns. **Columns...** also provides keyboard-operable visibility, width, order, numeric-aware sorting, and default-column restoration. At least one column must remain visible.
 
 Select one or multiple rows to see applicable operations. The Actions pane and row context menu use the same selection rules. Double-click or press **Enter** to inspect properties or follow a related view; use **Back/Forward** to navigate between resources.
 
@@ -96,10 +96,17 @@ Provider-tree expansion loads only that location's containers, not their descend
 | F5 | Refresh the active resource |
 | Alt+Left / Alt+Right | Navigate back/forward |
 | Ctrl/Command+F | Focus the result filter |
+| Ctrl/Command+A | Select all visible result rows |
 | Ctrl/Command+C | Copy selected rows |
 | Enter | Inspect properties or follow the row's related view |
+| Shift+F10 / menu key | Open the focused result table's context menu |
+| Tab / Shift+Tab | Traverse controls, including the pane splitters |
+| Left / Right on a splitter | Resize its neighboring panes within their minimum widths |
+| Escape in a dialog | Dismiss properties, column controls, or a prompt |
 
-Use **Export table...** to save the visible table as CSV. Filtering changes displayed rows without rerunning the query.
+Use **Export table...** to save the visible table as CSV. Filtering changes displayed rows without rerunning the query. Rows hidden by the filter lose their selection, with an explicit status message; visible selected rows remain selected. Selection alone does not execute an action.
+
+**View -> High contrast** switches the console and subsequently opened dialogs to black/white chrome with yellow command/focus accents. It is an explicit, session-local choice, not automatic detection of the OS contrast palette. Controls expose accessible names; selected result rows expose Selected/Not selected item status, and selection/outcome/error text does not depend on color. See the [fixture acceptance evidence and native accessibility limits](shell-validation.md) before treating this as screen-reader certification.
 
 ## Run actions deliberately
 

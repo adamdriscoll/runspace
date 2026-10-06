@@ -169,3 +169,5 @@ At a 1200 x 800 client area and 100% scale, the tree/grid/action proportions sho
 Capture original reference and modern screenshots at matched client sizes/DPI with benign data. Compare region placement, information density, grid affordances, pane chrome, and action grouping; record intentional deviations. Do not score copied branding or artwork.
 
 Behavioral walkthroughs must cover multi-selection, related navigation, prompts, a failing query, partial errors, cancellation, saved layout, and keyboard-only operation. Until those comparisons exist, describe the UI as **PowerGUI-inspired**, not pixel-identical.
+
+The [2026-10-06 fixture acceptance record](../shell-validation.md) documents the implemented size/scale, keyboard, contrast, selection, and adapter checks. Its offscreen captures are not native-monitor or screen-reader certification; the remaining platform qualifications are listed there.

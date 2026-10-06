@@ -1,14 +1,51 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Runspace.Desktop"
              x:Class="Runspace.Desktop.App"
              RequestedThemeVariant="Light">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="ConsoleChrome">#F0F0F0</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleContent">White</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleText">#1F2328</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleMuted">#59636E</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleBorder">#BAC4CE</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleStrip">#EDF2F7</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleWarning">#FFF4D6</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleError">DarkRed</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleAccent">#1F5A95</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleFocus">#155FAD</SolidColorBrush>
+          <LinearGradientBrush x:Key="ConsoleCaption" StartPoint="0%,0%" EndPoint="0%,100%">
+            <GradientStop Color="#EEEEEE" Offset="0" />
+            <GradientStop Color="#D0D0D0" Offset="1" />
+          </LinearGradientBrush>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="{x:Static local:App.HighContrastTheme}">
+          <SolidColorBrush x:Key="ConsoleChrome">Black</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleContent">Black</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleText">White</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleMuted">White</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleBorder">White</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleStrip">Black</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleWarning">Black</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleError">#FFFF00</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleAccent">#FFFF00</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleFocus">#FFFF00</SolidColorBrush>
+          <SolidColorBrush x:Key="ConsoleCaption">Black</SolidColorBrush>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
   <Application.Styles>
     <FluentTheme DensityStyle="Compact" />
     <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
     <Style Selector="Window">
       <Setter Property="FontSize" Value="12" />
       <Setter Property="FontFamily" Value="Segoe UI, Arial, sans-serif" />
-      <Setter Property="Background" Value="#F0F0F0" />
+      <Setter Property="Background" Value="{DynamicResource ConsoleChrome}" />
+      <Setter Property="Foreground" Value="{DynamicResource ConsoleText}" />
     </Style>
     <Style Selector="Button">
       <Setter Property="CornerRadius" Value="2" />
@@ -28,30 +65,45 @@
     </Style>
     <Style Selector="Button.toolbar">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="Margin" Value="1,0" />
     </Style>
     <Style Selector="Button.action">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Left" />
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Foreground" Value="#1F5A95" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource ConsoleAccent}" />
       <Setter Property="Padding" Value="10,5" />
     </Style>
     <Style Selector="Button.action:disabled">
-      <Setter Property="Foreground" Value="#828B95" />
+      <Setter Property="Foreground" Value="{DynamicResource ConsoleMuted}" />
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Opacity" Value="0.6" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="Button:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource ConsoleFocus}" />
+    </Style>
+    <Style Selector="GridSplitter:focus-visible">
+      <Setter Property="Background" Value="{DynamicResource ConsoleFocus}" />
     </Style>
     <Style Selector="DataGrid">
       <Setter Property="FontSize" Value="12" />
       <Setter Property="RowHeight" Value="23" />
       <Setter Property="ColumnHeaderHeight" Value="25" />
-      <Setter Property="Background" Value="White" />
+      <Setter Property="Background" Value="{DynamicResource ConsoleContent}" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="GridLinesVisibility" Value="Horizontal" />
-      <Setter Property="HorizontalGridLinesBrush" Value="#E7EBEF" />
+      <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource ConsoleBorder}" />
+    </Style>
+    <Style Selector="DataGrid#ResultsGrid DataGridRow">
+      <Setter Property="AutomationProperties.Name" Value="{Binding Label}" />
+      <Setter Property="AutomationProperties.ItemStatus" Value="Not selected" />
+    </Style>
+    <Style Selector="DataGrid#ResultsGrid DataGridRow:selected">
+      <Setter Property="AutomationProperties.ItemStatus" Value="Selected" />
     </Style>
     <Style Selector="TabItem">
       <Setter Property="FontSize" Value="12" />
@@ -59,16 +111,11 @@
       <Setter Property="Padding" Value="10,4" />
     </Style>
     <Style Selector="Border.paneHeader">
-      <Setter Property="Height" Value="25" />
+      <Setter Property="MinHeight" Value="25" />
       <Setter Property="Padding" Value="8,3" />
-      <Setter Property="BorderBrush" Value="#B9C8D8" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ConsoleBorder}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
-      <Setter Property="Background">
-        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-          <GradientStop Color="#EEEEEE" Offset="0" />
-          <GradientStop Color="#D0D0D0" Offset="1" />
-        </LinearGradientBrush>
-      </Setter>
+      <Setter Property="Background" Value="{DynamicResource ConsoleCaption}" />
     </Style>
   </Application.Styles>
 </Application>
