@@ -20,13 +20,18 @@ Hosted Windows/macOS images contain development tools. Empty search paths and ve
 | --- | --- | --- |
 | Windows 11 x64, build 26200 (`10.0.26200.0`) | Self-contained `win-x64`, relocated temporary payload/home, empty application search paths; graphical desktop on a development host | Runtime, providers/drives/files/environment, module imports, `Add-Type`, desktop rendering/version display, and all three missing-dependency cases passed. Not pristine-machine certification. |
 | Ubuntu 24.04.5 LTS x64 | Clean `ubuntu:24.04` container; self-contained `linux-x64`; non-root, network disabled; no installed .NET/PowerShell; Xvfb/X11 | All positive probes and all three missing-dependency cases passed. Physical X11/XWayland/GPU coverage is not established. |
-| macOS 15 ARM64 | `osx-arm64` published target | Pending execution on the new hosted-runner gate. |
+| macOS 15.7.9 ARM64 | Self-contained `osx-arm64`; fresh hosted macOS 15 runner, relocated temporary payload/home, empty application search paths; native desktop backend | All positive probes and all three missing-dependency cases passed. Not pristine-install/GPU certification. |
+| Windows Server 2025 x64, build 26100 (`10.0.26100.0`) | Self-contained `win-x64`; fresh hosted runner image `windows-2025-vs2026` version `20260925.250.1`; relocated payload/home, empty application search paths | All positive probes and all three missing-dependency cases passed. Validation-only server coverage; not a desktop-product support commitment. |
 
-Both completed runs used SDK **10.0.401** to publish, and reported bundled **.NET 10.0.12**, **PowerShell 7.6.6**, **Avalonia 12.1.3**, and **DataGrid 12.1.2**. Imported SDK manifests report module version **7.0.0.0**; that is not the engine/package version.
+The successful [three-platform CI run 37493267268](https://github.com/adamdriscoll/runspace/actions/runs/37493267268) executed commit [`b78ec35`](https://github.com/adamdriscoll/runspace/commit/b78ec35b372e41ddd23dfdd60a76428edb8ae90e). Its downloaded `publish-validation-win-x64`, `publish-validation-linux-x64`, and `publish-validation-osx-arm64` reports were inspected: all positive reports passed, and all nine deliberately damaged-payload reports failed with the expected dependency-specific error.
+
+Completed runs used SDK **10.0.401** to publish, and reported bundled **.NET 10.0.12**, **PowerShell 7.6.6**, **Avalonia 12.1.3**, and **DataGrid 12.1.2**. Imported SDK manifests report module version **7.0.0.0**; that is not the engine/package version.
 
 Ubuntu native package evidence included ICU `74.2-1ubuntu3.1`, OpenSSL `3.0.13-0ubuntu3.16`, fontconfig `2.15.0-1.1ubuntu2`, X11 `2:1.8.7-1build1`, GLib `2.80.0-6ubuntu3.9`, and Xvfb `2:21.1.12-1ubuntu1.8`. CI records the complete current package list rather than assuming this servicing snapshot remains unchanged.
 
 Actual portable providers were Alias, Environment, FileSystem, Function, and Variable, with discovered filesystem, `Temp`, `Env`, Alias, Function, and Variable drives. Windows also exposed Registry and Certificate providers. These checks do not manufacture universal Windows roots on Unix.
+
+The first CI attempt caught an incorrect assumption about macOS development-output native paths. The SDK's universal `libpsl-native.dylib` lives under `runtimes/osx/native` before publish and is flattened into the payload when published. The resolver now covers both verified layouts, with a regression test that still rejects missing assets; the successful run above includes that correction.
 
 ## Reproduce
 

@@ -35,8 +35,8 @@ Support is limited to the OS/architecture and validation scope below, not every 
 | --- | --- | --- |
 | Ubuntu 24.04 LTS / x64 | `linux-x64` | Verified on clean Ubuntu 24.04.5 with X11/Xvfb, no installed PowerShell/.NET, and no checkout. Supported baseline with the native prerequisites below; a physical desktop/XWayland session remains a separate qualification. |
 | Windows 11 / x64 | `win-x64` | Verified on build 26200 with the published payload relocated, empty executable/module search paths, and a temporary home. Provisional desktop baseline; this host was not a pristine Windows installation. Other Windows 11 builds are not yet verified. |
-| macOS 15 / ARM64 | `osx-arm64` | CI validation target. Published execution evidence is pending; do not infer support from successful compilation alone. |
-| Windows Server / x64 | `win-x64` | Hosted Windows runner validation only; not a desktop-product support commitment. |
+| macOS 15 / ARM64 | `osx-arm64` | Verified on macOS 15.7.9 ARM64 using a relocated payload, temporary home, empty application search paths, and the real native desktop backend. Provisional desktop baseline; hosted-runner isolation is not pristine-install/GPU certification. Other macOS 15 updates are not yet verified. |
+| Windows Server 2025 / x64 | `win-x64` | Verified on hosted build 26100 with isolated application search paths. Validation-only coverage, not a desktop-product support commitment. |
 
 Other versions and architectures are **unverified and outside the current support matrix**, including Windows ARM64/x86, macOS Intel or macOS 26, other Linux distributions/architectures, and musl/Alpine. Native Wayland, headless operation without a display server, Windows PowerShell 5.1 hosting, trimming, Native AOT, and single-file publication are not supported deployment modes.
 
