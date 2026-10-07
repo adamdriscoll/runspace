@@ -1030,7 +1030,7 @@ public partial class MainWindow : Window
             await InvokeActionAsync(BuiltInCatalog.GetActions(drives, []).First(action => action.Id == ConsoleActionId.AddDrive));
     });
     private async void AboutClick(object? sender, RoutedEventArgs e) => await SafeAsync(() => Dialogs.MessageAsync(this, "About Runspace",
-        $"Runspace Administration Console\n.NET 10 / Avalonia 12 / PowerShell {Session.RuntimeVersion}\n\nAn original, cross-platform console inspired by PowerGUI. Built-in administration only; no PowerPacks, installer, or copied PowerGUI code.\n\nWindows-only views require Windows. Operations use your current account's permissions."));
+        "An original, cross platform console inspired by PowerGUI"));
     private async void ColumnsClick(object? sender, RoutedEventArgs e) =>
         await SafeAsync(() => Dialogs.ColumnsAsync(this, ResultsGrid, _columns));
 }
