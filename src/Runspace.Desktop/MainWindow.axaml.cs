@@ -54,12 +54,17 @@ public partial class MainWindow : Window
     public MainWindow() : this(null, true) { }
 
     public MainWindow(IConsoleSession? session, bool persistLayout = false, WorkspaceStore? workspaceStore = null)
+        : this(session, persistLayout, workspaceStore, null) { }
+
+    internal MainWindow(IConsoleSession? session, bool persistLayout, WorkspaceStore? workspaceStore,
+        IScriptEditorInteraction? editorInteraction)
     {
         _session = session;
         _workspaceStore = workspaceStore ?? (persistLayout ? new WorkspaceStore(new FileWorkspaceStorage(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Runspace"))) : null);
         InitializeComponent();
         DataContext = _model;
+        InitializeEditors(editorInteraction);
         BuildNavigation();
         NavigationTree.AddHandler(TreeViewItem.ExpandedEvent, Expanded);
         NavigationTree.AddHandler(TreeViewItem.CollapsedEvent, Collapsed);
@@ -307,7 +312,7 @@ public partial class MainWindow : Window
         LocationBox.IsVisible = node.Kind == ResourceKind.ProviderPath;
         GoButton.IsVisible = LocationBox.IsVisible;
         Breadcrumb.IsVisible = !LocationBox.IsVisible;
-        DocumentTabs.SelectedIndex = 0;
+        DocumentTabs.SelectedItem = ResultsTab;
         if (addHistory)
             AddNavigationRoute(node);
         UpdateNavigationButtons();
@@ -872,9 +877,10 @@ public partial class MainWindow : Window
 
     private async void WindowKeyDown(object? sender, KeyEventArgs e)
     {
+        if (await HandleEditorKeyAsync(e)) return;
         if (e.Key == Key.F5) { e.Handled = true; await SafeAsync(RefreshAsync); }
         else if (e.Key == Key.F && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
-        { e.Handled = true; DocumentTabs.SelectedIndex = 0; FilterBox.Focus(); }
+        { e.Handled = true; DocumentTabs.SelectedItem = ResultsTab; FilterBox.Focus(); }
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Left or Key.Right)
         { e.Handled = true; await SafeAsync(() => MoveHistoryAsync(e.Key == Key.Left ? -1 : 1)); }
     }
@@ -939,26 +945,32 @@ public partial class MainWindow : Window
         if (_readyToClose) return;
         e.Cancel = true;
         if (_closing || _confirmingClose) return;
-        try { SaveWorkspace(); }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
+        _confirmingClose = true;
+        try
         {
-            ReportError(exception);
-            _confirmingClose = true;
-            bool closeWithoutSaving;
-            try
+            if (_editorOperation is not null) await _editorOperation;
+            if (!await _scriptWorkspace.CanCloseAsync()) return;
+            try { SaveWorkspace(); }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
             {
-                closeWithoutSaving = await Dialogs.ConfirmAsync(this, "Workspace was not saved",
+                ReportError(exception);
+                var closeWithoutSaving = await Dialogs.ConfirmAsync(this, "Workspace was not saved",
                     $"{exception.Message}\n\nClose without saving? Cancel keeps the window open so you can recover or retry.",
                     acceptLabel: "Close without saving");
-            }
-            finally { _confirmingClose = false; }
-            if (!closeWithoutSaving)
-            {
-                _model.Status = "Workspace was not saved. Window remains open; repair storage and retry.";
-                return;
+                if (!closeWithoutSaving)
+                {
+                    _model.Status = "Workspace was not saved. Window remains open; repair storage and retry.";
+                    return;
+                }
             }
         }
+        finally
+        {
+            _confirmingClose = false;
+            EditorWorkspaceChanged(this, EventArgs.Empty);
+        }
         _closing = true;
+        DisposeEditors();
         _lifetime.Cancel();
         _active?.Cancel();
         await SafeAsync(async () =>
@@ -1004,12 +1016,16 @@ public partial class MainWindow : Window
         else _model.Status = "Select one object to inspect its properties.";
     });
     private async void ExportClick(object? sender, RoutedEventArgs e) => await SafeAsync(ExportAsync);
-    private void ResultsClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedIndex = 0;
-    private void HistoryClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedIndex = 1;
+    private void ResultsClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedItem = ResultsTab;
+    private void HistoryClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedItem = HistoryTab;
+    private void CurrentScriptClick(object? sender, RoutedEventArgs e) { DocumentTabs.SelectedItem = CurrentScriptTab; CurrentScriptEditor.FocusEditor(); }
     private void DiagnosticsClick(object? sender, RoutedEventArgs e) => DiagnosticsPane.IsVisible = !DiagnosticsPane.IsVisible;
     private void HideDiagnosticsClick(object? sender, RoutedEventArgs e) => DiagnosticsPane.IsVisible = false;
-    private void HighContrastClick(object? sender, RoutedEventArgs e) =>
+    private void HighContrastClick(object? sender, RoutedEventArgs e)
+    {
         RequestedThemeVariant = HighContrastMenu.IsChecked ? App.HighContrastTheme : ThemeVariant.Light;
+        UpdateEditorContrast();
+    }
     private void ExitClick(object? sender, RoutedEventArgs e) => Close();
     private async void ResetLayoutClick(object? sender, RoutedEventArgs e) => await WorkspaceOperationAsync(() =>
     {

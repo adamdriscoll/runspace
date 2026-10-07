@@ -12,6 +12,7 @@ Built with **.NET 10**, **PowerShell 7**, and **Avalonia** for Windows, macOS, a
 - Manage Windows services and inspect event logs, registry keys, shares, local accounts, and CIM objects.
 - Filter and sort typed tables, inspect properties, follow related views, and export visible rows as CSV.
 - Run selection-aware actions with confirmation where appropriate, then inspect PowerShell history and diagnostics.
+- Edit one `.ps1` document with New/Open/Save/Save As in the **Script Editor**, and inspect the highlighted, read-only **Current Script**. Editing does not run scripts or validate their syntax.
 
 Operations run with your current account's permissions. Missing capabilities and failures are shown explicitly.
 

@@ -52,6 +52,14 @@
         "resolved": "2.1.27548.20260419",
         "contentHash": "l17nI3XVDN3oMnpjf2pnmJg0YTwK4m6NLsn/itAjDMdObTFxN77D5F1M9sRMSfViSY3KKcse1ROczwgoWLJsnA=="
       },
+      "Avalonia.AvaloniaEdit": {
+        "type": "Transitive",
+        "resolved": "12.0.0",
+        "contentHash": "VNfaYdTbiQ2DlSkSMoLg4DhTbQmQR0cFT6nqEqLkaYGLjBWmUdv5BNIuoObK4c9cgzFqnEJXBaOp4R/bxgFKfQ==",
+        "dependencies": {
+          "Avalonia": "12.0.0"
+        }
+      },
       "Avalonia.BuildServices": {
         "type": "Transitive",
         "resolved": "11.3.2",
@@ -574,6 +582,15 @@
         "resolved": "13.0.4",
         "contentHash": "pdgNNMai3zv51W5aq268sujXUyx7SNdE2bj1wZcWjAQrKMFZV260lbqYop1d2GM67JI1huLRwxo9ZqnfF/lC6A=="
       },
+      "PoshTools.Iseberg.Editor": {
+        "type": "Transitive",
+        "resolved": "0.0.4",
+        "contentHash": "isK47uXECcF3TsyK5xcjr/7lX5xNQ21zK4cCv9AvmGm5+u7Nq+i1eWitEiHYzRibQIHBWYB5KQQN9vXqVP/UTg==",
+        "dependencies": {
+          "Avalonia": "[12.1.3]",
+          "Avalonia.AvaloniaEdit": "[12.0.0]"
+        }
+      },
       "runtime.android-arm.runtime.native.System.IO.Ports": {
         "type": "Transitive",
         "resolved": "10.0.5",
@@ -1053,6 +1070,7 @@
           "Avalonia.Controls.DataGrid": "[12.1.2, )",
           "Avalonia.Desktop": "[12.1.3, )",
           "Avalonia.Themes.Fluent": "[12.1.3, )",
+          "PoshTools.Iseberg.Editor": "[0.0.4, 0.0.4]",
           "Runspace.Core": "[1.0.0, )",
           "Runspace.PowerShell": "[1.0.0, )"
         }
