@@ -159,7 +159,7 @@ Imports inspect data without executing scripts. Enabling a third-party kit or im
 
 Profiles are disabled by default; offer explicit inspection/opt-in later. Do not elevate the process automatically. Persist credential references only if a later credential-store design is approved, never secret values.
 
-See [Console Kits](console-kits.md) for package lifecycle and limits still to decide.
+See the [agreed Console Kit v1 contract](console-kits.md) for schema, independent host-contract versioning, package lifecycle, and concrete safety limits. Loading, semantic validation, and execution integration remain unimplemented.
 
 ## Testing through the interfaces
 

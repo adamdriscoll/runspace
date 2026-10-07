@@ -1,6 +1,6 @@
 # Implemented administration foundation
 
-This iteration implements the built-in administration console. The architecture, UX, and kit-format proposals remain design context, not a statement that all their proposals are implemented. Extensibility, Console Kits, and installer development are deferred; remaining work and acceptance gates are tracked in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).
+This iteration implements the built-in administration console. The architecture and UX proposals remain design context, not a statement that all their proposals are implemented. The [Console Kit v1 format and compatibility contract](console-kits.md) is agreed and has a schema/original examples, but kit loading, semantic validation, execution integration, and installer development are deferred; remaining work and acceptance gates are tracked in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).
 
 ## Project layout
 

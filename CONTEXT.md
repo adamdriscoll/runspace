@@ -1,12 +1,16 @@
 # Runspace administration console
 
-Runspace is an object-oriented administration console: administrators navigate resources, inspect PowerShell objects, and invoke contextual operations. This glossary uses **Console Kit** as the working replacement name for PowerGUI's PowerPack; branding is provisional.
+Runspace is an object-oriented administration console: administrators navigate resources, inspect PowerShell objects, and invoke contextual operations. **Console Kit** is the canonical name for its distributable administration experiences.
 
 ## Language
 
 **Console Kit**:
-A distributable collection of navigation definitions, queries, views, and contextual actions for an administration domain. A Console Kit is not a PowerShell module, although it can require modules.
+A distributable collection of navigation definitions, queries, views, or contextual actions for an administration domain, including action-only collections. A Console Kit is not a PowerShell module, although it can require modules.
 _Avoid_: PowerPack, plugin, module when referring to this collection.
+
+**Kit Contract**:
+The host's agreement with Console Kit authors about interpreting definitions, checking compatibility, and executing contributions. It is distinct from a kit's release identity and the desktop application's release identity.
+_Avoid_: Application version, kit version when referring to this agreement.
 
 **Workspace**:
 An administrator's saved arrangement of enabled Console Kits, session references, navigation state, and view preferences.

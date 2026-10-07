@@ -2,7 +2,7 @@
 
 Use [GitHub issues](https://github.com/adamdriscoll/runspace/issues) to report bugs and propose changes. The [roadmap tracker](https://github.com/adamdriscoll/runspace/issues/24) groups remaining work, dependencies, and acceptance gates; keep task status there rather than adding Markdown roadmaps.
 
-The current implementation is the built-in administration console. Discuss changes to public contracts, persisted formats, dependencies, or product scope before implementing them.
+The current implementation is the built-in administration console. The [Console Kit v1 contract](docs/console-kits.md) agrees a future extension format but does not implement loading. Discuss changes to public contracts, persisted formats, dependencies, or product scope before implementing them.
 
 ## Development setup
 
@@ -45,6 +45,8 @@ dotnet test Runspace.slnx
 ```
 
 Add regression coverage for behavior changes. Use original fixture objects, uniquely named temporary drives/directories, and disposable child processes. Tests must never perform destructive actions against arbitrary machine resources or require production credentials.
+
+For Console Kit schema/example changes, run `pwsh -NoProfile -File .\scripts\Test-KitContract.ps1` (PowerShell 7.6). This checks manifest shapes and negative shape cases only, not semantic validity, archive safety, or execution compatibility.
 
 Desktop tests use Skia software rendering as well as headless input. Minimal Linux SDK containers need `libfontconfig1` and `fonts-dejavu-core`; no display server is needed for these tests. Set `RUNSPACE_UI_CAPTURE_DIR` to a scratch output directory to retain benign fixture PNGs and size/scale/row-count JSON. See [shell validation](docs/shell-validation.md) for the exact capture gate and its limits.
 
@@ -100,6 +102,6 @@ Do not commit credentials, private result data, machine-specific reference captu
 
 ## Design references
 
-Start with the [implemented foundation](docs/foundation.md) and [domain glossary](CONTEXT.md). The [product direction](docs/product-vision.md), [architecture alternatives](docs/architecture.md), [console interaction specification](docs/ux/admin-console.md), and [kit contract proposal](docs/console-kits.md) provide design context, not a second backlog.
+Start with the [implemented foundation](docs/foundation.md) and [domain glossary](CONTEXT.md). The [product direction](docs/product-vision.md), [architecture alternatives](docs/architecture.md), and [console interaction specification](docs/ux/admin-console.md) provide design context, not a second backlog. The [agreed Console Kit v1 contract](docs/console-kits.md) and its schema constrain future kit implementation without claiming that it exists.
 
 The [platform research](docs/research/modern-platform.md) records runtime constraints. Detailed [reference research](docs/research/powergui-3.8.md) is kept separate from user-facing guidance; historical assets are not product dependencies.
