@@ -46,9 +46,9 @@
       },
       "PoshTools.Iseberg.Editor": {
         "type": "Direct",
-        "requested": "[0.0.3, 0.0.3]",
-        "resolved": "0.0.3",
-        "contentHash": "IsIISRysJI/tnlLKjowIL60mq79K5F2wMn7QFNYMPgjODSy94yjeZef35sU+iXeCz8bJnwaVo06IGlR5+e4YOg==",
+        "requested": "[0.0.4, 0.0.4]",
+        "resolved": "0.0.4",
+        "contentHash": "isK47uXECcF3TsyK5xcjr/7lX5xNQ21zK4cCv9AvmGm5+u7Nq+i1eWitEiHYzRibQIHBWYB5KQQN9vXqVP/UTg==",
         "dependencies": {
           "Avalonia": "[12.1.3]",
           "Avalonia.AvaloniaEdit": "[12.0.0]"

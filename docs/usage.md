@@ -140,7 +140,7 @@ Interactive host input is not recorded and its history is labeled **Non-replayab
 
 ## Script editing only
 
-**View -> Script Editor** opens one editable document using published `PoshTools.Iseberg.Editor` **0.0.3**. Use its toolbar or **File -> New/Open/Save/Save As**. Ctrl+N/O/S and Ctrl+Shift+S (Command on macOS) select the editor and operate on that document. Ctrl/Command+F opens Find when a script editor has focus; normal selection, undo/redo and clipboard editing remain available. The editor shows its full file path, an unsaved-change marker, and file-operation status.
+**View -> Script Editor** opens one editable document using published `PoshTools.Iseberg.Editor` **0.0.4**. Use its toolbar or **File -> New/Open/Save/Save As**. Ctrl+N/O/S and Ctrl+Shift+S (Command on macOS) select the editor and operate on that document. Ctrl/Command+F opens Find when a script editor has focus; normal selection, undo/redo and clipboard editing remain available. The editor shows its full file path, an unsaved-change marker, and file-operation status.
 
 New, Open and application close protect unsaved changes with **Save / Discard / Cancel**. Cancelling a save picker or a failed save aborts that operation. File failures show a script-specific dialog without changing the document/path/dirty state or the console's result/history/diagnostic state. File operations temporarily lock the editing area, not the administration session. Files are opened as text only; nothing is executed.
 

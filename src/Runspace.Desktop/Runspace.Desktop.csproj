@@ -16,7 +16,7 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
-    <PackageReference Include="PoshTools.Iseberg.Editor" Version="[0.0.3]" GeneratePathProperty="true" />
+    <PackageReference Include="PoshTools.Iseberg.Editor" Version="[0.0.4]" GeneratePathProperty="true" />
     <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" Condition="'$(Configuration)' == 'Debug'">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>

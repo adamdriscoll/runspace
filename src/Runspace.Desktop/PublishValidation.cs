@@ -5,6 +5,7 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.TextInput;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
 using Avalonia.Media.Imaging;
@@ -123,14 +124,98 @@ internal sealed class PublishValidation(string reportPath)
             tabs.SelectedItem = window.FindControl<TabItem>("ResultsTab");
             if (!ReferenceEquals(items, grid.ItemsSource) || model.History != history)
                 throw new InvalidOperationException("Editor switching changed the administration results/history.");
+            CheckEditorImeLifecycle(window, editor, window.FindControl<TabItem>("ScriptEditorTab")!);
+            CheckEditorImeLifecycle(window, preview, window.FindControl<TabItem>("CurrentScriptTab")!);
+            CheckEditorImeDisposal(window);
             checks.Add(new("Editor", "Render the published editing-only and read-only controls; input, undo, find, contrast and F5/F8 isolation",
-                true, "PoshTools.Iseberg.Editor 0.0.3 / AvaloniaEdit 12.0.0; semantic diagnostics unavailable. Synthetic input only, not physical keyboard or screen-reader certification."));
+                true, "PoshTools.Iseberg.Editor 0.0.4 / AvaloniaEdit 12.0.0; semantic diagnostics unavailable. Includes real IME client queries during ten focused tab cycles and disposal. Synthetic input only, not physical keyboard or screen-reader certification."));
         }
         finally
         {
-            editor.Document.Text = string.Empty;
+            window.ScriptWorkspace.Document.Text = string.Empty;
             window.RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light;
             tabs.SelectedItem = window.FindControl<TabItem>("ResultsTab");
+        }
+    }
+
+    private static void CheckEditorImeLifecycle(MainWindow window, PowerShellEditorControl editor, TabItem tab)
+    {
+        var tabs = window.FindControl<TabControl>("DocumentTabs")!;
+        var document = editor.Document;
+        var originalText = document.Text;
+        TextInputMethodClient? client = null;
+        var notifications = 0;
+        void QueryClient(object? sender, EventArgs args)
+        {
+            _ = client!.SurroundingText;
+            _ = client.Selection;
+            notifications++;
+        }
+        try
+        {
+            tabs.SelectedItem = tab;
+            window.UpdateLayout();
+            document.Text = "# IME lifecycle fixture\n# second line";
+            if (!editor.FocusEditor()) throw new InvalidOperationException("The native IME fixture could not focus its editor.");
+            editor.CaretOffset = 0;
+            var request = new TextInputMethodClientRequestedEventArgs { RoutedEvent = InputElement.TextInputMethodClientRequestedEvent };
+            editor.TextEditor.TextArea.RaiseEvent(request);
+            client = request.Client;
+            if (editor.IsReadOnly ? client is not null : client is null)
+                throw new InvalidOperationException("The editor's actual IME client did not match its read-only state.");
+            if (client is not null) client.SurroundingTextChanged += QueryClient;
+            editor.CaretOffset = 4;
+            for (var iteration = 0; iteration < 10; iteration++)
+            {
+                tabs.SelectedItem = window.FindControl<TabItem>("ResultsTab");
+                tabs.SelectedItem = tab;
+                window.UpdateLayout();
+                if (!editor.FocusEditor() || !ReferenceEquals(document, editor.Document) || editor.CaretOffset != 4)
+                    throw new InvalidOperationException("IME detach/reattach lost the host document or caret.");
+                editor.CaretOffset = 5;
+                editor.CaretOffset = 4;
+            }
+            if (client is not null && notifications == 0 || document.Text != "# IME lifecycle fixture\n# second line")
+                throw new InvalidOperationException("IME lifecycle probes did not query the real client or changed the host document.");
+        }
+        finally
+        {
+            if (client is not null) client.SurroundingTextChanged -= QueryClient;
+            document.Text = originalText;
+        }
+    }
+
+    private static void CheckEditorImeDisposal(MainWindow owner)
+    {
+        var document = new AvaloniaEdit.Document.TextDocument("# IME disposal fixture");
+        using var editor = new PowerShellEditorControl(document);
+        var probe = new Window { Content = editor, Width = 500, Height = 200, Title = "Editor lifecycle validation" };
+        TextInputMethodClient? client = null;
+        var notifications = 0;
+        void QueryClient(object? sender, EventArgs args)
+        {
+            _ = client!.SurroundingText;
+            _ = client.Selection;
+            notifications++;
+        }
+        try
+        {
+            probe.Show(owner);
+            probe.UpdateLayout();
+            if (!editor.FocusEditor()) throw new InvalidOperationException("The native disposal probe could not focus its editor.");
+            var request = new TextInputMethodClientRequestedEventArgs { RoutedEvent = InputElement.TextInputMethodClientRequestedEvent };
+            editor.TextEditor.TextArea.RaiseEvent(request);
+            client = request.Client ?? throw new InvalidOperationException("The disposal probe did not expose its actual IME client.");
+            client.SurroundingTextChanged += QueryClient;
+            editor.CaretOffset = 4;
+            editor.Dispose();
+            if (notifications == 0 || document.Text != "# IME disposal fixture")
+                throw new InvalidOperationException("IME disposal did not preserve the host document or query the client.");
+        }
+        finally
+        {
+            if (client is not null) client.SurroundingTextChanged -= QueryClient;
+            probe.Close();
         }
     }
 
