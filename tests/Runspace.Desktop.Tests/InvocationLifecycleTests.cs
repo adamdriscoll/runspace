@@ -49,7 +49,7 @@ public sealed class InvocationLifecycleTests
             Query = _ => Task.FromResult(Result("usable", outcome, empty: outcome == InvocationOutcome.Completed))
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => Model(window).Status.StartsWith(outcome.ToString()));
@@ -82,7 +82,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var first = new TaskCompletionSource<ConsoleResult>();
         var second = new TaskCompletionSource<ConsoleResult>();
         try
@@ -139,7 +139,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var refresh = new TaskCompletionSource<ConsoleResult>();
         try
         {
@@ -179,7 +179,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var first = new TaskCompletionSource<ConsoleResult>();
         var second = new TaskCompletionSource<ConsoleResult>();
         try
@@ -217,7 +217,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var completion = new TaskCompletionSource<ConsoleResult>();
         try
         {
@@ -253,7 +253,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var actionOutput = new TaskCompletionSource<ConsoleResult>();
         var properties = new TaskCompletionSource<IReadOnlyList<ObjectProperty>>();
         try
@@ -290,7 +290,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var completion = new TaskCompletionSource<ConsoleResult>();
         try
         {
@@ -327,7 +327,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var query = new TaskCompletionSource<ConsoleResult>();
         var properties = new TaskCompletionSource<IReadOnlyList<ObjectProperty>>();
         try
@@ -371,7 +371,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var properties = new TaskCompletionSource<IReadOnlyList<ObjectProperty>>();
         try
         {
@@ -406,7 +406,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !Model(window).IsBusy);
@@ -431,7 +431,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !Model(window).IsBusy);
@@ -478,7 +478,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         var completion = new TaskCompletionSource<ConsoleResult>();
         try
         {
@@ -514,7 +514,7 @@ public sealed class InvocationLifecycleTests
     {
         var session = new LifecycleSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !Model(window).IsBusy);
@@ -555,7 +555,7 @@ public sealed class InvocationLifecycleTests
             Release = runtime.ReleaseResult
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await getter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));

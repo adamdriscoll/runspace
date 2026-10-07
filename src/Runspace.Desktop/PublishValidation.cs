@@ -53,6 +53,9 @@ internal sealed class PublishValidation(string reportPath)
                 while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
                 {
                     var model = (ConsoleViewModel)window.DataContext!;
+                    if (window.IsSessionReady && window.FindControl<TreeView>("NavigationTree")!.SelectedItem is null)
+                        window.FindControl<TreeView>("NavigationTree")!.SelectedItem =
+                            model.Roots[0].Children.Single(item => item.Node.Kind == ResourceKind.Processes);
                     var rows = window.FindControl<DataGrid>("ResultsGrid")!.ItemsSource?.Cast<ConsoleRow>();
                     if (!model.IsBusy && rows?.Any(row => Convert.ToInt32(row.Cells["Id"].Value) == Environment.ProcessId) == true)
                     {

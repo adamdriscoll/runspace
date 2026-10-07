@@ -4,6 +4,24 @@ Runspace presents a resource tree on the left, typed object tables in the center
 
 ## Launching Runspace
 
+### Release packages
+
+Download the package matching your platform from [GitHub Releases](https://github.com/adamdriscoll/runspace/releases). All packages include the .NET runtime and embedded PowerShell; neither needs to be installed separately. Extract the complete ZIP, not just its executable.
+
+| Platform | Release assets | Install and launch |
+| --- | --- | --- |
+| Windows x64 | `Runspace-<version>-win-x64.zip` and `.msi` | Extract the ZIP and run `Runspace.Desktop.exe`, or run the MSI (requires administrator permission) and launch **Runspace** from the Start menu. The MSI installs in Program Files and can be removed through Windows Installed apps. |
+| Ubuntu 24.04 x64 | `Runspace-<version>-linux-x64.zip` | Install the [native prerequisites](#linux-prerequisites), extract with `unzip`, and launch `./Runspace.Desktop` in a graphical session. |
+| macOS 15 ARM64 | `Runspace-<version>-osx-arm64.zip` and `.dmg` | Open the DMG and drag **Runspace.app** to **Applications**, or extract the ZIP and move the app there. Launch **Runspace** from Applications. |
+
+Packages are **unsigned**, and the macOS app is not notarized. Windows may show an unknown-publisher/SmartScreen warning. macOS Gatekeeper may block the downloaded app; after verifying its source, use **System Settings -> Privacy & Security -> Open Anyway** if macOS offers that option. Do not disable OS security globally. Managed-device policy may prevent launching unsigned applications.
+
+Release packaging preserves Unix executable permissions. If another extraction tool removes them, run `chmod +x ./Runspace.Desktop` on Linux, or `chmod +x /Applications/Runspace.app/Contents/MacOS/Runspace.Desktop` on macOS. Command-line macOS launch uses `open /Applications/Runspace.app`.
+
+The [support matrix](#supported-platform-matrix) still applies; packaging does not broaden the verified OS/architecture scope.
+
+### Source and CI outputs
+
 To run from source, install the .NET 10 SDK matching `global.json` and follow the [README quick start](../README.md#quick-start). The PowerShell engine is embedded; a separate PowerShell installation is not required.
 
 On macOS/Linux, use this project path after restoring and building the solution:
@@ -108,7 +126,7 @@ The tree loads at most 200 children per location and 1,000 nodes overall. Omitte
 
 Use **Export table...** to save the visible table as CSV. Filtering changes displayed rows without rerunning the query. Rows hidden by the filter lose their selection, with an explicit status message; visible selected rows remain selected. Selection alone does not execute an action.
 
-**View -> High contrast** switches the console and subsequently opened dialogs to black/white chrome with yellow command/focus accents. It is an explicit, session-local choice, not automatic detection of the OS contrast palette. Controls expose accessible names; selected result rows expose Selected/Not selected item status, and selection/outcome/error text does not depend on color. See the [fixture acceptance evidence and native accessibility limits](shell-validation.md) before treating this as screen-reader certification.
+**View -> High contrast** switches the console and subsequently opened dialogs to black/white chrome with yellow command/focus accents. It is an explicit, saved workspace choice, not automatic detection of the OS contrast palette. Controls expose accessible names; selected result rows expose Selected/Not selected item status, and selection/outcome/error text does not depend on color. See the [fixture acceptance evidence and native accessibility limits](shell-validation.md) before treating this as screen-reader certification.
 
 ## Run actions deliberately
 
@@ -144,6 +162,8 @@ Interactive host input is not recorded and its history is labeled **Non-replayab
 
 New, Open and application close protect unsaved changes with **Save / Discard / Cancel**. Cancelling a save picker or a failed save aborts that operation. File failures show a script-specific dialog without changing the document/path/dirty state or the console's result/history/diagnostic state. File operations temporarily lock the editing area, not the administration session. Files are opened as text only; nothing is executed.
 
+On application close, the script guard runs before saving workspace preferences. Cancelling either the script decision/save or a later workspace-save failure keeps the window open and re-enables editing. **Close without saving** in the workspace failure prompt applies only to preferences, not to the script's separate deliberate-save decision. Restored workspace contrast applies to both editors; saved resources remain paused until explicitly opened, and neither editor document/path is restored or serialized.
+
 Opened UTF-8 (with or without BOM), UTF-16 and UTF-32 BOM-marked files retain their encoding and existing line endings. New documents save as UTF-8 without BOM. Invalid UTF-8 without a supported BOM is rejected rather than silently replacing characters. Save uses a flushed, same-directory temporary file and atomic replacement; changes on disk are detected and require reopening or Save As. Save As asks before replacing an existing file. A competing filesystem rename during the final swap preserves the displaced version in a named `.save-backup` file and reports its location instead of silently losing it. This is conflict detection/recovery, not a cross-process filesystem transaction. Unix permission bits are preserved on replacement; new Unix files start owner-only. Symbolic-link/reparse-point files may be read but require Save As to a regular file. Local filesystem paths are required; cloud-only storage-provider URIs are unsupported.
 
 **Current Script** is a separate, read-only highlighted representation of the latest administration invocation. It updates as the console runs queries/actions and never replaces the editable document. Both editors use lexical highlighting only: **semantic diagnostics and completion are unavailable**, not "zero syntax errors." High contrast disables both lexical palettes and uses the console's text/background/gutter colors.
@@ -154,9 +174,30 @@ The package and AvaloniaEdit are MIT-licensed. Published output includes their l
 
 ## Saved settings
 
-Window and pane sizes are saved in `Runspace/layout.json` under the platform's local application-data directory. **View -> Reset layout** restores default proportions.
+Preferences are saved in versioned `Runspace/workspace.json` under the platform's local application-data directory. The workspace restores window size/location, pane sizes and visibility, high contrast, and each built-in view's column order/visibility/width, typed sorting, and display filter. **View -> Navigation pane / Actions pane** toggles the side panes. **View -> Reset layout** immediately saves default window/pane proportions, visibility, and contrast without removing per-view overrides or saved references.
 
-Live result objects and credentials are not persisted. PowerShell profiles are not automatically executed. The current layout file does not save full workspace, remote-session, or per-view column/filter state.
+Startup restores preferences **without running a query**, discovering session drives, loading profiles, recreating drives, enabling kits, or reconnecting sessions. Choose a resource, or use **Open saved resource** to deliberately run the saved built-in view. Expand **PowerShell Drives** to discover the current session's drives. Dynamic provider paths and related views containing live object handles are session-only, not saved navigation targets.
+
+The old `layout.json` is read only when no workspace exists. Its positive, finite window/pane dimensions are clamped to supported ranges; the original is left untouched when the new workspace is saved. Window placement is fitted to an available display's working area using its current scaling, including when a saved monitor is no longer attached.
+
+Saves validate the document, flush a unique temporary file in the same directory, and atomically replace the committed workspace. Interrupted temporary files are not restored. Corrupt, unreadable, unknown-field, or unsupported-version data produces a persistent recovery notice and blocks saving; **Reset layout does not bypass that protection**. In **View -> Workspace settings**, repair the original externally and choose **Reload repaired workspace**, or explicitly **Back up damaged file and reset preferences**. Reset archives the original as a uniquely named `.bak` before saving defaults. If an ordinary save fails on close, Cancel keeps the window open so storage can be repaired; closing without saving is a separate explicit choice.
+
+Unavailable resource/session/kit references remain visibly unresolved and retain their overrides across saves. Workspace settings lists their identifiers; reload after repairing the data, or confirm **Remove unresolved references** to discard just those user preferences. This does not delete installed content or establish a session. Kits and remote-session contracts are not implemented: their identifiers are inert references, not install, trust, connection, or execution instructions.
+
+Only preference data and stable identifiers are serialized. Live objects, results, row selections/handles, scripts, invocation history, diagnostics, raw host prompts, credentials, secure parameters, custom drives, and private session state are never saved. Installed kit content and trust decisions are not part of the workspace file.
+
+### Workspace version 1
+
+Files use UTF-8 (an optional UTF-8 BOM is accepted), and property names are case-sensitive. The root requires `Version`, `Layout`, and `Views`; `ActiveView` may be null. Unknown fields, duplicate JSON properties, incomplete view/reference/column/sort entries, invalid encoding, and unsupported versions require recovery rather than guessing or dropping data.
+
+| Field | Saved data |
+| --- | --- |
+| `Version` | Integer `1` |
+| `Layout` | `Width`/`Height` in DIP, optional paired `X`/`Y` in screen pixels, `NavigationWidth`, `ActionsWidth`, `DiagnosticsHeight`, `NavigationVisible`, `ActionsVisible`, `DiagnosticsVisible`, `HighContrast` |
+| `ActiveView` | Optional reference with `SessionId`, `KitId`, `ResourceId`; current built-ins use `local` / `builtin.local-system` / the catalog's stable node ID |
+| `Views` | User overrides keyed by a `Reference` of the same shape, ordered `Columns` (`Key`, `Visible`, `Width`), ordered `Sorting` (`Key`, `Descending`), and a non-executable text `Filter` |
+
+References and column/sort keys must be nonempty, bounded identifiers. Duplicate view/column/sort keys, non-finite or out-of-range dimensions, null preference lists, and all-hidden saved columns are rejected before commit. Files are limited to 4 MiB, with at most 500 views, 200 columns/sort keys per view, and 4096 filter characters. Missing columns/sort keys retain their overrides; if no saved visible column is available, the first available column is shown with an explicit diagnostic.
 
 ## Current scope
 

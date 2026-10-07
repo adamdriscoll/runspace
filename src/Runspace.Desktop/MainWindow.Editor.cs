@@ -16,7 +16,6 @@ public partial class MainWindow
     private ScriptEditorWorkspace _scriptWorkspace = null!;
     private readonly TextDocument _currentScriptDocument = new();
     private Task? _editorOperation;
-    private bool _confirmingEditorClose;
     internal ScriptEditorWorkspace ScriptWorkspace => _scriptWorkspace;
 
     private static KeyModifiers CommandModifier => OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
@@ -57,14 +56,14 @@ public partial class MainWindow
     private void EditorWorkspaceChanged(object? sender, EventArgs e)
     {
         ScriptEditor.Document = _scriptWorkspace.Document;
-        ScriptEditor.IsReadOnly = _scriptWorkspace.IsBusy || _confirmingEditorClose;
+        ScriptEditor.IsReadOnly = _scriptWorkspace.IsBusy || _confirmingClose;
         var name = _scriptWorkspace.Path ?? "Untitled.ps1";
         ScriptEditorStatus.Text = $"{name} | {(_scriptWorkspace.IsDirty ? "Unsaved changes" : "No unsaved changes")} | {_scriptWorkspace.Status}";
         ScriptEditorTab.Header = _scriptWorkspace.IsDirty ? "Script Editor *" : "Script Editor";
         foreach (var button in new[] { NewScriptButton, OpenScriptButton, SaveScriptButton, SaveScriptAsButton })
-            button.IsEnabled = !_scriptWorkspace.IsBusy && !_confirmingEditorClose;
+            button.IsEnabled = !_scriptWorkspace.IsBusy && !_confirmingClose;
         foreach (var menu in new[] { NewScriptMenu, OpenScriptMenu, SaveScriptMenu, SaveScriptAsMenu })
-            menu.IsEnabled = !_scriptWorkspace.IsBusy && !_confirmingEditorClose;
+            menu.IsEnabled = !_scriptWorkspace.IsBusy && !_confirmingClose;
     }
 
     private async void EditorErrorOccurred(object? sender, EditorErrorEventArgs e) =>
@@ -87,14 +86,14 @@ public partial class MainWindow
 
     private async Task RunEditorOperationAsync(Func<Task<bool>> operation)
     {
-        if (_confirmingEditorClose || _scriptWorkspace.IsBusy || _closing) return;
+        if (_confirmingClose || _scriptWorkspace.IsBusy || _closing) return;
         FocusScriptEditor();
         _editorOperation = operation();
         try { await _editorOperation; }
         finally
         {
             _editorOperation = null;
-            if (!_closing && !_confirmingEditorClose) ScriptEditor.FocusEditor();
+            if (!_closing && !_confirmingClose) ScriptEditor.FocusEditor();
         }
     }
 

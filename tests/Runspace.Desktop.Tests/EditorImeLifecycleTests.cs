@@ -17,7 +17,7 @@ public sealed partial class ConsoleTests
         await File.WriteAllTextAsync(directory.File(), "# opened fixture\n# second line");
         var interaction = new ScriptInteraction { Choice = UnsavedScriptChoice.Discard, OpenPath = directory.File() };
         var session = new FixtureSession();
-        var window = new MainWindow(session, false, interaction);
+        var window = new MainWindow(session, false, null, interaction);
         window.Show();
         TextInputMethodClient? client = null;
         var notifications = 0;
@@ -70,7 +70,7 @@ public sealed partial class ConsoleTests
     {
         var interaction = new ScriptInteraction { Choice = UnsavedScriptChoice.Discard };
         var session = new FixtureSession();
-        var window = new MainWindow(session, false, interaction);
+        var window = new MainWindow(session, false, null, interaction);
         window.Show();
         TextInputMethodClient? client = null;
         var notifications = 0;

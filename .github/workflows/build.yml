@@ -2,8 +2,16 @@ name: Build and test
 
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to embed in the published application
+        required: false
+        type: string
+        default: '1.0.0'
 
 permissions:
   contents: read
@@ -39,7 +47,10 @@ jobs:
           RUNSPACE_UI_CAPTURE_DIR: ${{ runner.temp }}/runspace-ui
         run: dotnet test Runspace.slnx --configuration Release --no-build --logger "trx;LogFileName=results.trx"
       - name: Publish console
-        run: dotnet publish src/Runspace.Desktop/Runspace.Desktop.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/publish
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: dotnet publish src/Runspace.Desktop/Runspace.Desktop.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true --no-restore "-p:Version=$env:PACKAGE_VERSION" -p:ContinuousIntegrationBuild=true --output artifacts/publish
       - name: Upload console
         uses: actions/upload-artifact@v4
         with:

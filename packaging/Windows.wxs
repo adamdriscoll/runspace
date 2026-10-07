@@ -1,0 +1,31 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Runspace" Manufacturer="Adam Driscoll" Version="$(var.Version)"
+           UpgradeCode="17C9768E-8D31-4D03-8B20-37B5E7E7ACF4" Scope="perMachine" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Runspace is already installed."
+                  AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Runspace" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="RunspaceMenuFolder" Name="Runspace" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Payload" Directory="INSTALLFOLDER">
+      <Component Id="Executable" Guid="*">
+        <File Id="RunspaceExecutable" Source="$(var.PublishDir)\Runspace.Desktop.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="RunspaceMenuFolder" Name="Runspace"
+                    Advertise="yes" WorkingDirectory="INSTALLFOLDER" />
+        </File>
+        <RemoveFolder Id="RemoveStartMenuFolder" Directory="RunspaceMenuFolder" On="uninstall" />
+      </Component>
+      <Files Include="$(var.PublishDir)\**">
+        <Exclude Files="$(var.PublishDir)\Runspace.Desktop.exe" />
+      </Files>
+    </ComponentGroup>
+    <Feature Id="Application" Title="Runspace" Level="1">
+      <ComponentGroupRef Id="Payload" />
+    </Feature>
+  </Package>
+</Wix>

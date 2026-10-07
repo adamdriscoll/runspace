@@ -1,12 +1,12 @@
 # Implemented administration foundation
 
-This iteration implements the built-in administration console. The architecture, UX, and kit-format proposals remain design context, not a statement that all their proposals are implemented. Extensibility, Console Kits, and installer development are deferred; remaining work and acceptance gates are tracked in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).
+This iteration implements the built-in administration console. The architecture and UX proposals remain design context, not a statement that all their proposals are implemented. The [Console Kit v1 format and compatibility contract](console-kits.md) is agreed and has a schema/original examples, but kit loading, semantic validation, execution integration, and installer development are deferred; remaining work and acceptance gates are tracked in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24).
 
 ## Project layout
 
 | Project | Responsibility |
 | --- | --- |
-| Runspace.Core | Built-in resource/action definitions, safe display cells, typed filtering/sorting contracts |
+| Runspace.Core | Built-in resource/action definitions, safe display cells, typed filtering/sorting, versioned preference-only workspace storage |
 | Runspace.PowerShell | Persistent local runspace, serialized operations, original object handles, provider/CIM queries, actions, streams and cancellation |
 | Runspace.Desktop | Native Avalonia tree/table/action shell, dialogs, history, diagnostics, clipboard/CSV, layout |
 | Runspace.Tests | Core behavior and real embedded-runtime tests |
@@ -59,7 +59,7 @@ Local-system domain queries are built in. Windows CIM, service, event-log, regis
 
 Network Configuration uses real local network objects on all platforms. Its result table includes DHCP scope and WINS proxy fields only on Windows, where those property getters are supported.
 
-The shell has splitters and tabs rather than a floating dock manager. CSV export is supported; legacy XML/HTML reporting and charts are not. Layout stores only window/pane sizes, not arbitrary live session state or credentials.
+The shell has splitters and tabs rather than a floating dock manager. CSV export is supported; legacy XML/HTML reporting and charts are not. The [versioned workspace](usage.md#saved-settings) stores layout, per-view preferences, and inert stable references, not arbitrary live session state or credentials. Startup runs no resource or drive-discovery query; opening a saved resource requires deliberate user action. Kit and remote-session integration remain deferred.
 
 Mutating actions bind parameters and act on fixed selected handles. UI confirmation does not grant elevated rights. Cancellation is cooperative, and a refreshed table after partial errors is not reported as proof that every action succeeded.
 

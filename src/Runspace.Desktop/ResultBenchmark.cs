@@ -30,6 +30,9 @@ internal sealed class ResultBenchmark(string reportPath)
                         throw new TimeoutException("Cached benchmark window did not become ready.");
                     await Task.Delay(10);
                 }
+                var model = (ConsoleViewModel)window.DataContext!;
+                window.FindControl<TreeView>("NavigationTree")!.SelectedItem =
+                    model.Roots[0].Children.Single(item => item.Node.Kind == ResourceKind.Processes);
                 window.UpdateLayout();
                 var firstVisibleMs = ready.Elapsed.TotalMilliseconds;
                 var grid = window.FindControl<DataGrid>("ResultsGrid")!;

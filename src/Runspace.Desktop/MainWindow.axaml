@@ -6,7 +6,7 @@
         Title="Runspace - Administration Console"
         Width="1200" Height="800" MinWidth="900" MinHeight="600"
         WindowStartupLocation="CenterScreen">
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <Menu x:Name="MainMenu" Grid.Row="0" Background="{DynamicResource ConsoleChrome}">
       <MenuItem Header="_File">
         <MenuItem x:Name="NewScriptMenu" Header="_New script" Click="NewScriptClick" />
@@ -27,9 +27,12 @@
         <MenuItem Header="Current Script" Click="CurrentScriptClick" />
         <MenuItem Header="Script Editor" Click="ScriptEditorClick" />
         <MenuItem Header="_Diagnostics" Click="DiagnosticsClick" />
+        <MenuItem x:Name="NavigationPaneMenu" Header="Navigation pane" ToggleType="CheckBox" IsChecked="True" Click="PaneVisibilityClick" />
+        <MenuItem x:Name="ActionsPaneMenu" Header="Actions pane" ToggleType="CheckBox" IsChecked="True" Click="PaneVisibilityClick" />
         <MenuItem x:Name="HighContrastMenu" Header="High _contrast" ToggleType="CheckBox" Click="HighContrastClick" />
         <Separator />
         <MenuItem x:Name="ResetLayoutMenu" Header="Reset _layout" Click="ResetLayoutClick" />
+        <MenuItem x:Name="WorkspaceSettingsMenu" Header="Workspace settings..." Click="WorkspaceSettingsClick" />
       </MenuItem>
       <MenuItem Header="_Tools">
         <MenuItem Header="PowerShell providers" Click="ProvidersClick" />
@@ -56,7 +59,14 @@
         </WrapPanel>
       </DockPanel>
     </Border>
-    <Grid x:Name="WorkspaceGrid" Grid.Row="2">
+    <Border x:Name="WorkspaceNotice" Grid.Row="2" IsVisible="False" Background="{DynamicResource ConsoleWarning}" Padding="8,4">
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock x:Name="WorkspaceNoticeText" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+        <Button x:Name="OpenSavedViewButton" Grid.Column="1" Content="Open saved resource" Margin="8,0" Click="OpenSavedViewClick" />
+        <Button x:Name="WorkspaceSettingsButton" Grid.Column="2" Content="Workspace settings..." Click="WorkspaceSettingsClick" />
+      </Grid>
+    </Border>
+    <Grid x:Name="WorkspaceGrid" Grid.Row="3">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="220" MinWidth="160" MaxWidth="350" />
         <ColumnDefinition Width="4" />
@@ -64,7 +74,7 @@
         <ColumnDefinition Width="4" />
         <ColumnDefinition Width="220" MinWidth="180" MaxWidth="350" />
       </Grid.ColumnDefinitions>
-      <Border Grid.Column="0" Background="{DynamicResource ConsoleContent}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="0,0,1,0">
+      <Border x:Name="NavigationPane" Grid.Column="0" Background="{DynamicResource ConsoleContent}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="0,0,1,0">
         <DockPanel>
           <Border DockPanel.Dock="Top" Classes="paneHeader">
             <TextBlock Text="Navigation Tree" FontWeight="SemiBold" />
@@ -106,7 +116,7 @@
                 </Grid>
               </Border>
               <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Background="{DynamicResource ConsoleStrip}">
-                <TextBox x:Name="FilterBox" AutomationProperties.Name="Filter displayed objects" Margin="6,3" PlaceholderText="Filter displayed objects..." Text="{Binding Filter, Mode=TwoWay}" TextChanged="FilterChanged" />
+                <TextBox x:Name="FilterBox" AutomationProperties.Name="Filter displayed objects" MaxLength="4096" Margin="6,3" PlaceholderText="Filter displayed objects..." Text="{Binding Filter, Mode=TwoWay}" TextChanged="FilterChanged" />
                 <Button x:Name="ColumnsButton" Grid.Column="1" Content="Columns..." Margin="0,3,6,3" Click="ColumnsClick" />
               </Grid>
               <DataGrid x:Name="ResultsGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
@@ -169,7 +179,7 @@
       <GridSplitter x:Name="ActionsSplitter" Grid.Column="3" ResizeDirection="Columns" Focusable="True"
                     AutomationProperties.Name="Actions pane width" AutomationProperties.HelpText="Use Left and Right to resize."
                     Background="{DynamicResource ConsoleBorder}" />
-      <Border Grid.Column="4" Background="{DynamicResource ConsoleContent}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="1,0,0,0">
+      <Border x:Name="ActionsPane" Grid.Column="4" Background="{DynamicResource ConsoleContent}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="1,0,0,0">
         <DockPanel>
           <Border DockPanel.Dock="Top" Classes="paneHeader">
             <TextBlock Text="Actions" FontWeight="SemiBold" />
@@ -183,7 +193,7 @@
         </DockPanel>
       </Border>
     </Grid>
-    <Border Grid.Row="3" MinHeight="24" Background="{DynamicResource ConsoleChrome}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="0,1,0,0" Padding="8,3">
+    <Border Grid.Row="4" MinHeight="24" Background="{DynamicResource ConsoleChrome}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="0,1,0,0" Padding="8,3">
       <DockPanel>
         <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" Margin="10,0,2,0" AutomationProperties.LiveSetting="Polite" />
         <ProgressBar DockPanel.Dock="Right" Width="90" Height="10" IsIndeterminate="True" IsVisible="{Binding IsBusy}" Margin="4,3" />

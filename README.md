@@ -18,6 +18,10 @@ Operations run with your current account's permissions. Missing capabilities and
 
 ## Quick start
 
+Download a self-contained package from [GitHub Releases](https://github.com/adamdriscoll/runspace/releases): ZIPs for Windows x64, Linux x64, and macOS ARM64, plus a Windows MSI and macOS DMG. Packages are currently unsigned; see the [installation and launch instructions](docs/usage.md#launching-runspace) for platform requirements and OS security prompts.
+
+To run from source:
+
 Install the **.NET 10 SDK** matching `global.json` (10.0.401, with patch roll-forward). A separate PowerShell installation is not required for the embedded engine.
 
 From the repository root in PowerShell:
@@ -38,5 +42,6 @@ For published executables, macOS/Linux launch commands, native dependencies, and
 | [Contributing](CONTRIBUTING.md) | Development setup, tests, publishing, and pull requests |
 | [Implementation notes](docs/foundation.md) | Current project structure and technical constraints |
 | [Domain glossary](CONTEXT.md) | Resource, object, session, and action terminology |
+| [Console Kit contract](docs/console-kits.md) | Agreed v1 manifest/schema, compatibility, and original examples; loading is not implemented |
 
 Planned work and acceptance gates live in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24), not a separate Markdown roadmap.

@@ -1,5 +1,6 @@
 using System.Management.Automation.Runspaces;
 using System.Text;
+using System.Text.Json;
 using Avalonia.Automation;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
@@ -22,6 +23,131 @@ namespace Runspace.Desktop.Tests;
 
 public sealed partial class ConsoleTests
 {
+    [AvaloniaFact]
+    public async Task EditorStartupHonorsSavedPreferencesWithoutExecutingOrPersistingUserScripts()
+    {
+        using var directory = new ScriptDirectory();
+        var storage = new WorkspaceFixtureStorage();
+        storage.Files[WorkspaceStore.FileName] = JsonSerializer.Serialize(new WorkspaceDocument
+        {
+            ActiveView = ResourceReference.BuiltIn("processes"),
+            Layout = new() { HighContrast = true, ActionsVisible = false },
+            Views = [new(ResourceReference.BuiltIn("processes"), [], [], "beta")]
+        });
+        var session = new FixtureSession();
+        var interaction = new ScriptInteraction { SavePath = directory.File("private-script.ps1"), Choice = UnsavedScriptChoice.Save };
+        var window = new MainWindow(session, false, new(storage), interaction);
+        window.Show();
+        try
+        {
+            Assert.True(window.IsSessionReady);
+            Assert.Equal(0, session.Queries);
+            Assert.Equal(0, session.DriveReads);
+            Assert.Equal(App.HighContrastTheme, window.ActualThemeVariant);
+            var editor = window.FindControl<PowerShellEditorControl>("ScriptEditor")!;
+            var preview = window.FindControl<PowerShellEditorControl>("CurrentScriptEditor")!;
+            Assert.False(editor.EnableSyntaxHighlighting);
+            Assert.False(preview.EnableSyntaxHighlighting);
+            editor.Document.Text = "# private editor text";
+            window.FindControl<TabControl>("DocumentTabs")!.SelectedItem = window.FindControl<TabItem>("ScriptEditorTab");
+            window.UpdateLayout();
+            Assert.True(editor.FocusEditor());
+            Press(window, Key.F5);
+            Assert.Equal(0, session.Queries);
+            Assert.Equal(0, session.DriveReads);
+            Click(window.FindControl<Button>("OpenSavedViewButton")!);
+            await UntilAsync(() => session.Queries == 1 && !((ConsoleViewModel)window.DataContext!).IsBusy);
+            Assert.Equal("beta", window.FindControl<TextBox>("FilterBox")!.Text);
+            Assert.Equal("# private editor text", editor.Document.Text);
+            window.Close();
+            await UntilAsync(() => session.Disposed);
+            Assert.Equal("# private editor text", await File.ReadAllTextAsync(interaction.SavePath!));
+            var serialized = storage.Files[WorkspaceStore.FileName];
+            Assert.DoesNotContain("private editor text", serialized);
+            Assert.DoesNotContain("private-script.ps1", serialized);
+            Assert.DoesNotContain("Script", serialized);
+            Assert.Equal("beta", Assert.Single(storage.Saved.Views).Filter);
+        }
+        finally { if (window.IsVisible) { interaction.Choice = UnsavedScriptChoice.Discard; window.Close(); } }
+        session = new FixtureSession();
+        window = new MainWindow(session, workspaceStore: new(storage));
+        window.Show();
+        try
+        {
+            Assert.Equal(0, session.Queries);
+            Assert.Equal(string.Empty, window.ScriptWorkspace.Document.Text);
+            Assert.Equal(string.Empty, window.FindControl<PowerShellEditorControl>("CurrentScriptEditor")!.Document.Text);
+            Assert.Null(window.ScriptWorkspace.Path);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public async Task EditorCloseCancellationPrecedesWorkspaceSaveAndKeepsPreferencesUnchanged()
+    {
+        var storage = new WorkspaceFixtureStorage();
+        var interaction = new ScriptInteraction();
+        var session = new FixtureSession();
+        var window = new MainWindow(session, false, new(storage), interaction);
+        window.Show();
+        window.ScriptWorkspace.Document.Text = "# retain unsaved fixture";
+        window.Close();
+        await UntilAsync(() => !window.ScriptWorkspace.IsBusy);
+        Assert.True(window.IsVisible);
+        Assert.Empty(storage.Files);
+        Assert.False(session.Disposed);
+        Assert.False(window.FindControl<PowerShellEditorControl>("ScriptEditor")!.IsReadOnly);
+        interaction.Choice = UnsavedScriptChoice.Save;
+        window.Close();
+        await UntilAsync(() => !window.ScriptWorkspace.IsBusy);
+        Assert.True(window.IsVisible);
+        Assert.Empty(storage.Files);
+        interaction.Choice = UnsavedScriptChoice.Discard;
+        window.Close();
+        await UntilAsync(() => session.Disposed);
+        Assert.DoesNotContain("retain unsaved fixture", storage.Files[WorkspaceStore.FileName]);
+    }
+
+    [AvaloniaFact]
+    public async Task EditorAndWorkspaceCloseGuardsBothSurviveSaveFailureCancelAndRetry()
+    {
+        var storage = new WorkspaceFixtureStorage { FailSave = true };
+        var interaction = new ScriptInteraction { Choice = UnsavedScriptChoice.Discard };
+        var session = new FixtureSession();
+        var window = new MainWindow(session, false, new(storage), interaction);
+        window.Show();
+        try
+        {
+            var editor = window.FindControl<PowerShellEditorControl>("ScriptEditor")!;
+            editor.Document.Text = "# unsaved while workspace fails";
+            window.Close();
+            await UntilAsync(() => window.OwnedWindows.Any());
+            Assert.True(editor.IsReadOnly);
+            var prompt = window.OwnedWindows.Single();
+            Assert.Equal("Workspace was not saved", prompt.Title);
+            window.Close();
+            Assert.Same(prompt, window.OwnedWindows.Single());
+            DialogButton(prompt, "ConfirmationCancel");
+            await UntilAsync(() => !editor.IsReadOnly);
+            Assert.True(window.IsVisible);
+            Assert.False(session.Disposed);
+            Assert.True(window.ScriptWorkspace.IsDirty);
+            Assert.Equal("# unsaved while workspace fails", editor.Document.Text);
+            Assert.Empty(storage.Files);
+            interaction.Choice = UnsavedScriptChoice.Cancel;
+            window.Close();
+            await UntilAsync(() => !window.ScriptWorkspace.IsBusy);
+            Assert.Empty(window.OwnedWindows);
+            Assert.True(window.IsVisible);
+            storage.FailSave = false;
+            interaction.Choice = UnsavedScriptChoice.Discard;
+            window.Close();
+            await UntilAsync(() => session.Disposed);
+            Assert.DoesNotContain("unsaved while workspace fails", storage.Files[WorkspaceStore.FileName]);
+        }
+        finally { if (window.IsVisible) { storage.FailSave = false; interaction.Choice = UnsavedScriptChoice.Discard; window.Close(); } }
+    }
+
     private sealed class ScriptInteraction : IScriptEditorInteraction
     {
         public string? OpenPath { get; set; }
@@ -233,8 +359,8 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession();
         var interaction = new ScriptInteraction { Choice = UnsavedScriptChoice.Discard };
-        var window = new MainWindow(session, false, interaction);
-        window.Show();
+        var window = new MainWindow(session, false, null, interaction);
+        TestNavigation.ShowResource(window);
         try
         {
             var model = (ConsoleViewModel)window.DataContext!;
@@ -324,8 +450,8 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession();
         var interaction = new ScriptInteraction { Choice = UnsavedScriptChoice.Discard };
-        var window = new MainWindow(session, false, interaction);
-        window.Show();
+        var window = new MainWindow(session, false, null, interaction);
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -364,8 +490,8 @@ public sealed partial class ConsoleTests
             OpenGate = new(TaskCreationOptions.RunContinuationsAsynchronously)
         };
         var session = new FixtureSession();
-        var window = new MainWindow(session, false, interaction);
-        window.Show();
+        var window = new MainWindow(session, false, null, interaction);
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -398,8 +524,8 @@ public sealed partial class ConsoleTests
     public async Task ScriptEditorShortcutsUndoFindContrastAndCloseCancelStayLocal()
     {
         var interaction = new ScriptInteraction();
-        var window = new MainWindow(new FixtureSession(), false, interaction);
-        window.Show();
+        var window = new MainWindow(new FixtureSession(), false, null, interaction);
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
