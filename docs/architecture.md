@@ -149,6 +149,8 @@ Availability is determined by the installed runtime, loaded provider/modules, OS
 
 ## Storage and trust
 
+The built-in desktop now implements the preference-only workspace storage seam described in [Saved settings](usage.md#saved-settings): version 1, legacy layout migration, validated atomic commits, protected recovery, and inert unresolved references. Kit installation/trust and remote-session integration below remain proposals.
+
 Use platform-standard per-user configuration/data locations. Separate versioned workspace JSON, installed kit content, kit trust state, and redacted diagnostic/history storage.
 
 Write atomically, validate before replacing, and report corrupt/unsupported files with an actionable recovery choice. Do not silently overwrite them with defaults.

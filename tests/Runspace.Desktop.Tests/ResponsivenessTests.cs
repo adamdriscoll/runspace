@@ -25,7 +25,7 @@ public sealed partial class ConsoleTests
         var session = new FixtureSession { Query = _ => Task.FromResult(result) };
         var window = new MainWindow(session) { Width = 1200, Height = 800 };
         var ready = Stopwatch.StartNew();
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -118,7 +118,7 @@ public sealed partial class ConsoleTests
                     """, arguments: [started, release], columns: cached.Columns)
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             var model = (ConsoleViewModel)window.DataContext!;

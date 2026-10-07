@@ -126,7 +126,7 @@ The tree loads at most 200 children per location and 1,000 nodes overall. Omitte
 
 Use **Export table...** to save the visible table as CSV. Filtering changes displayed rows without rerunning the query. Rows hidden by the filter lose their selection, with an explicit status message; visible selected rows remain selected. Selection alone does not execute an action.
 
-**View -> High contrast** switches the console and subsequently opened dialogs to black/white chrome with yellow command/focus accents. It is an explicit, session-local choice, not automatic detection of the OS contrast palette. Controls expose accessible names; selected result rows expose Selected/Not selected item status, and selection/outcome/error text does not depend on color. See the [fixture acceptance evidence and native accessibility limits](shell-validation.md) before treating this as screen-reader certification.
+**View -> High contrast** switches the console and subsequently opened dialogs to black/white chrome with yellow command/focus accents. It is an explicit, saved workspace choice, not automatic detection of the OS contrast palette. Controls expose accessible names; selected result rows expose Selected/Not selected item status, and selection/outcome/error text does not depend on color. See the [fixture acceptance evidence and native accessibility limits](shell-validation.md) before treating this as screen-reader certification.
 
 ## Run actions deliberately
 
@@ -158,9 +158,30 @@ Interactive host input is not recorded and its history is labeled **Non-replayab
 
 ## Saved settings
 
-Window and pane sizes are saved in `Runspace/layout.json` under the platform's local application-data directory. **View -> Reset layout** restores default proportions.
+Preferences are saved in versioned `Runspace/workspace.json` under the platform's local application-data directory. The workspace restores window size/location, pane sizes and visibility, high contrast, and each built-in view's column order/visibility/width, typed sorting, and display filter. **View -> Navigation pane / Actions pane** toggles the side panes. **View -> Reset layout** immediately saves default window/pane proportions, visibility, and contrast without removing per-view overrides or saved references.
 
-Live result objects and credentials are not persisted. PowerShell profiles are not automatically executed. The current layout file does not save full workspace, remote-session, or per-view column/filter state.
+Startup restores preferences **without running a query**, discovering session drives, loading profiles, recreating drives, enabling kits, or reconnecting sessions. Choose a resource, or use **Open saved resource** to deliberately run the saved built-in view. Expand **PowerShell Drives** to discover the current session's drives. Dynamic provider paths and related views containing live object handles are session-only, not saved navigation targets.
+
+The old `layout.json` is read only when no workspace exists. Its positive, finite window/pane dimensions are clamped to supported ranges; the original is left untouched when the new workspace is saved. Window placement is fitted to an available display's working area using its current scaling, including when a saved monitor is no longer attached.
+
+Saves validate the document, flush a unique temporary file in the same directory, and atomically replace the committed workspace. Interrupted temporary files are not restored. Corrupt, unreadable, unknown-field, or unsupported-version data produces a persistent recovery notice and blocks saving; **Reset layout does not bypass that protection**. In **View -> Workspace settings**, repair the original externally and choose **Reload repaired workspace**, or explicitly **Back up damaged file and reset preferences**. Reset archives the original as a uniquely named `.bak` before saving defaults. If an ordinary save fails on close, Cancel keeps the window open so storage can be repaired; closing without saving is a separate explicit choice.
+
+Unavailable resource/session/kit references remain visibly unresolved and retain their overrides across saves. Workspace settings lists their identifiers; reload after repairing the data, or confirm **Remove unresolved references** to discard just those user preferences. This does not delete installed content or establish a session. Kits and remote-session contracts are not implemented: their identifiers are inert references, not install, trust, connection, or execution instructions.
+
+Only preference data and stable identifiers are serialized. Live objects, results, row selections/handles, scripts, invocation history, diagnostics, raw host prompts, credentials, secure parameters, custom drives, and private session state are never saved. Installed kit content and trust decisions are not part of the workspace file.
+
+### Workspace version 1
+
+Files use UTF-8 (an optional UTF-8 BOM is accepted), and property names are case-sensitive. The root requires `Version`, `Layout`, and `Views`; `ActiveView` may be null. Unknown fields, duplicate JSON properties, incomplete view/reference/column/sort entries, invalid encoding, and unsupported versions require recovery rather than guessing or dropping data.
+
+| Field | Saved data |
+| --- | --- |
+| `Version` | Integer `1` |
+| `Layout` | `Width`/`Height` in DIP, optional paired `X`/`Y` in screen pixels, `NavigationWidth`, `ActionsWidth`, `DiagnosticsHeight`, `NavigationVisible`, `ActionsVisible`, `DiagnosticsVisible`, `HighContrast` |
+| `ActiveView` | Optional reference with `SessionId`, `KitId`, `ResourceId`; current built-ins use `local` / `builtin.local-system` / the catalog's stable node ID |
+| `Views` | User overrides keyed by a `Reference` of the same shape, ordered `Columns` (`Key`, `Visible`, `Width`), ordered `Sorting` (`Key`, `Descending`), and a non-executable text `Filter` |
+
+References and column/sort keys must be nonempty, bounded identifiers. Duplicate view/column/sort keys, non-finite or out-of-range dimensions, null preference lists, and all-hidden saved columns are rejected before commit. Files are limited to 4 MiB, with at most 500 views, 200 columns/sort keys per view, and 4096 filter characters. Missing columns/sort keys retain their overrides; if no saved visible column is available, the first available column is shown with an explicit diagnostic.
 
 ## Current scope
 

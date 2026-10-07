@@ -14,14 +14,15 @@ namespace Runspace.Desktop;
 
 internal static class Dialogs
 {
-    public static async Task<bool> ConfirmAsync(Window owner, string title, string message, CancellationToken cancellationToken = default)
+    public static async Task<bool> ConfirmAsync(Window owner, string title, string message, CancellationToken cancellationToken = default,
+        string acceptLabel = "Execute")
     {
         var dialog = Create(owner, title, 500);
         var panel = new StackPanel { Margin = new Thickness(16), Spacing = 14 };
         panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap });
         var buttons = Buttons();
-        var cancel = new Button { Content = "Cancel", IsCancel = true };
-        var accept = new Button { Content = "Execute" };
+        var cancel = new Button { Name = "ConfirmationCancel", Content = "Cancel", IsCancel = true };
+        var accept = new Button { Name = "ConfirmationAccept", Content = acceptLabel };
         cancel.Click += (_, _) => dialog.Complete(false);
         accept.Click += (_, _) => dialog.Complete(true);
         buttons.Children.Add(cancel);

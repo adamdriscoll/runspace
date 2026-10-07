@@ -23,7 +23,7 @@ public sealed partial class ConsoleTests
             Outcome = InvocationOutcome.CompletedWithErrors
         };
         var window = new MainWindow(new FixtureSession { Query = _ => Task.FromResult(result) });
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -52,7 +52,7 @@ public sealed partial class ConsoleTests
             Query = node => Task.FromResult(node == root ? result : ProviderResult())
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             var model = (ConsoleViewModel)window.DataContext!;
@@ -83,7 +83,7 @@ public sealed partial class ConsoleTests
                 new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From("source") })))
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             var model = (ConsoleViewModel)window.DataContext!;
@@ -125,7 +125,7 @@ public sealed partial class ConsoleTests
                     node with { Id = $"{node.Id}-{index}", Name = $"child-{index}" })).ToArray()))
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             var model = (ConsoleViewModel)window.DataContext!;

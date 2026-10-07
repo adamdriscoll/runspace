@@ -81,7 +81,7 @@ public sealed partial class ConsoleTests
         var result = DenseFixture();
         var session = new FixtureSession { Query = _ => Task.FromResult(result) };
         var window = new MainWindow(session) { Width = width, Height = height };
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             window.SetRenderScaling(scale);
@@ -135,7 +135,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -174,7 +174,7 @@ public sealed partial class ConsoleTests
     public async Task ContextMenuPropertiesCanBeInvokedWithOnlyKeys()
     {
         var window = new MainWindow(new FixtureSession());
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -198,7 +198,7 @@ public sealed partial class ConsoleTests
         var result = DenseFixture() with { Rows = DenseFixture().Rows.Take(3).ToArray() };
         var session = new FixtureSession { Query = _ => Task.FromResult(result) };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -238,7 +238,7 @@ public sealed partial class ConsoleTests
             Diagnostics = [new(DateTimeOffset.UnixEpoch, "Error", "Benign fixture failure")]
         }) };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -263,7 +263,7 @@ public sealed partial class ConsoleTests
             index == 0 ? row with { RelatedNode = related } : row).ToArray() };
         var session = new FixtureSession { Query = _ => Task.FromResult(result) };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -296,7 +296,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -344,7 +344,7 @@ public sealed partial class ConsoleTests
     public async Task KeyboardColumnControlsMoveResizeSortHideAndRestore()
     {
         var window = new MainWindow(new FixtureSession());
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -394,7 +394,7 @@ public sealed partial class ConsoleTests
     public async Task HighContrastNamesFocusAndLongPromptsRemainReadable(double scale)
     {
         var window = new MainWindow(new FixtureSession()) { Width = 1000, Height = 680, RequestedThemeVariant = App.HighContrastTheme };
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             window.SetRenderScaling(scale);
@@ -443,7 +443,7 @@ public sealed partial class ConsoleTests
     public async Task ResetLayoutIsInvokableFromKeyboardMenu()
     {
         var window = new MainWindow(new FixtureSession());
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);

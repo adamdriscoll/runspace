@@ -47,7 +47,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession { ExecutionOutcome = InvocationOutcome.CompletedWithErrors };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -77,7 +77,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession();
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -103,7 +103,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession { ExecutionOutcome = outcome };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -123,7 +123,7 @@ public sealed partial class ConsoleTests
     public async Task SecureOutputSuppressionIsVisibleRatherThanAnEmptySuccess()
     {
         var window = new MainWindow(new FixtureSession { SuppressQueryOutput = true });
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -138,7 +138,7 @@ public sealed partial class ConsoleTests
     public async Task HostFieldsValidateOffDispatcherAndChoiceAndSecretsRemainEditable()
     {
         var window = new Window();
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             var validationThread = false;
@@ -208,7 +208,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession { PromptDuringExecution = true };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
         var grid = window.FindControl<DataGrid>("ResultsGrid")!;
         grid.SelectedItem = grid.ItemsSource!.Cast<ConsoleRow>().First();
@@ -238,7 +238,7 @@ public sealed partial class ConsoleTests
     {
         var session = new FixtureSession { ExecutionOutcome = InvocationOutcome.CompletedWithErrors };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
         var grid = window.FindControl<DataGrid>("ResultsGrid")!;
         var rows = grid.ItemsSource!.Cast<ConsoleRow>().ToArray();
@@ -262,7 +262,7 @@ public sealed partial class ConsoleTests
     public async Task StartupDisplaysProcessesAndAllBuiltInResources()
     {
         var window = new MainWindow(new FixtureSession());
-        window.Show();
+        TestNavigation.ShowResource(window);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
         window.UpdateLayout();
         var tree = window.FindControl<TreeView>("NavigationTree")!;
@@ -291,7 +291,7 @@ public sealed partial class ConsoleTests
             Query = node => node == root ? pending.Task : Task.FromResult(node == child ? empty : ProviderResult())
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -348,7 +348,7 @@ public sealed partial class ConsoleTests
                 new ConsoleRow(Guid.NewGuid(), new Dictionary<string, ConsoleCell> { ["Name"] = ConsoleCell.From("leaf") })))
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -395,7 +395,7 @@ public sealed partial class ConsoleTests
             Query = node => Task.FromResult(node == root ? ++attempts == 1 ? incomplete : complete : ProviderResult())
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             await UntilAsync(() => !((ConsoleViewModel)window.DataContext!).IsBusy);
@@ -465,7 +465,7 @@ public sealed partial class ConsoleTests
                 : ProviderResult())
         };
         var window = new MainWindow(session);
-        window.Show();
+        TestNavigation.ShowResource(window);
         try
         {
             var model = (ConsoleViewModel)window.DataContext!;
@@ -515,7 +515,7 @@ public sealed partial class ConsoleTests
     public async Task FilteringClearsHiddenSelectionAndUpdatesActions()
     {
         var window = new MainWindow(new FixtureSession());
-        window.Show();
+        TestNavigation.ShowResource(window);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
         window.UpdateLayout();
         var grid = window.FindControl<DataGrid>("ResultsGrid")!;
@@ -534,7 +534,7 @@ public sealed partial class ConsoleTests
     public async Task TableSortsNumericIdsRatherThanDisplayedStrings()
     {
         var window = new MainWindow(new FixtureSession());
-        window.Show();
+        TestNavigation.ShowResource(window);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
         window.UpdateLayout();
         var grid = window.FindControl<DataGrid>("ResultsGrid")!;
