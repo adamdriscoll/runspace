@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "runspace.processes",
+  "name": "Process inspection",
+  "version": "1.0.0",
+  "publisher": {
+    "name": "Runspace",
+    "url": "https://github.com/adamdriscoll/runspace"
+  },
+  "description": "Original read-only navigation, object inspection, and related process summaries.",
+  "license": { "file": "LICENSE" },
+  "compatibility": {
+    "runspace": { "minInclusive": "1.0.0", "maxExclusive": "2.0.0" },
+    "powerShell": { "minInclusive": "7.6.0", "maxExclusive": "8.0.0" },
+    "platforms": ["windows", "macos", "linux"]
+  },
+  "dependencies": {
+    "modules": [
+      {
+        "name": "Microsoft.PowerShell.Management",
+        "version": { "minInclusive": "7.0.0", "maxExclusive": "8.0.0" }
+      }
+    ],
+    "providers": []
+  },
+  "resources": [
+    { "path": "scripts/Summarize-Process.ps1", "kind": "script", "owner": "Adam Driscoll", "license": "MIT" },
+    { "path": "README.md", "kind": "documentation", "owner": "Adam Driscoll", "license": "MIT" },
+    { "path": "LICENSE", "kind": "license", "owner": "Adam Driscoll", "license": "MIT" }
+  ],
+  "nodes": [
+    { "id": "local", "name": "Local inspection", "kind": "folder", "order": 0 },
+    { "id": "processes", "name": "Processes", "kind": "query", "parentId": "local", "queryId": "processes.list", "order": 0 }
+  ],
+  "queries": [
+    {
+      "id": "processes.list",
+      "kind": "command",
+      "command": "Microsoft.PowerShell.Management\\Get-Process",
+      "parameters": [],
+      "outputTypes": ["System.Diagnostics.Process"],
+      "viewId": "processes.table"
+    }
+  ],
+  "views": [
+    {
+      "id": "processes.table",
+      "columns": [
+        { "id": "name", "property": ["ProcessName"], "label": "Name", "type": "string" },
+        { "id": "pid", "property": ["Id"], "label": "Id", "type": "integer" },
+        { "id": "memory", "property": ["WorkingSet64"], "label": "Memory", "type": "integer", "format": "bytes" }
+      ],
+      "defaultSort": [{ "columnId": "name", "direction": "ascending" }],
+      "identityProperties": [["ProcessName"], ["Id"]]
+    },
+    {
+      "id": "processes.summary-table",
+      "columns": [
+        { "id": "name", "property": ["ProcessName"], "label": "Name", "type": "string" },
+        { "id": "pid", "property": ["Id"], "label": "Id", "type": "integer" },
+        { "id": "summary", "property": ["Summary"], "label": "Summary", "type": "string" }
+      ]
+    }
+  ],
+  "actionGroups": [
+    { "id": "general", "name": "General", "order": 0 },
+    { "id": "related", "name": "Related information", "order": 1 }
+  ],
+  "actions": [
+    {
+      "id": "processes.properties",
+      "name": "Properties",
+      "description": "Inspect the original selected object's properties in its owning session.",
+      "groupId": "general",
+      "nodeIds": ["processes"],
+      "kind": "host",
+      "handler": "object.properties",
+      "parameters": [],
+      "input": { "mode": "host", "types": ["System.Object"], "selection": { "min": 1, "max": 1 } },
+      "mutates": false,
+      "supportsShouldProcess": false,
+      "result": { "policy": "retain" },
+      "requirements": { "capabilities": ["host.object-properties"] }
+    },
+    {
+      "id": "processes.summarize",
+      "name": "Process summaries",
+      "description": "Open a related table of read-only summaries for the fixed selection.",
+      "groupId": "related",
+      "nodeIds": ["processes"],
+      "kind": "script",
+      "script": "scripts/Summarize-Process.ps1",
+      "parameters": [
+        { "name": "Prefix", "label": "Summary prefix", "type": "string", "required": false, "default": "Process" }
+      ],
+      "input": { "mode": "pipeline", "types": ["System.Diagnostics.Process"], "selection": { "min": 1, "max": 128 } },
+      "mutates": false,
+      "supportsShouldProcess": false,
+      "result": { "policy": "related", "viewId": "processes.summary-table" }
+    }
+  ]
+}

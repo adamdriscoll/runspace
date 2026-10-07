@@ -37,5 +37,6 @@ For published executables, macOS/Linux launch commands, native dependencies, and
 | [Contributing](CONTRIBUTING.md) | Development setup, tests, publishing, and pull requests |
 | [Implementation notes](docs/foundation.md) | Current project structure and technical constraints |
 | [Domain glossary](CONTEXT.md) | Resource, object, session, and action terminology |
+| [Console Kit contract](docs/console-kits.md) | Agreed v1 manifest/schema, compatibility, and original examples; loading is not implemented |
 
 Planned work and acceptance gates live in [GitHub issues](https://github.com/adamdriscoll/runspace/issues/24), not a separate Markdown roadmap.

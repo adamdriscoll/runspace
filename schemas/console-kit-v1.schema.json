@@ -1,0 +1,425 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/adamdriscoll/runspace/main/schemas/console-kit-v1.schema.json",
+  "title": "Runspace Console Kit manifest v1",
+  "description": "Agreed manifest shape; not proof of semantic validity, trust, resource safety, or executable compatibility. See docs/console-kits.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "id", "name", "version", "publisher", "description",
+    "license", "compatibility", "dependencies", "resources", "nodes",
+    "queries", "views", "actionGroups", "actions"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+(?![\\s\\S])"
+    },
+    "name": { "$ref": "#/$defs/text" },
+    "version": { "$ref": "#/$defs/semver" },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "url"],
+      "properties": {
+        "name": { "$ref": "#/$defs/text" },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://[^/\\s?#]+(?:[/?#][^\\s]*)?(?![\\s\\S])" }
+      }
+    },
+    "description": { "$ref": "#/$defs/text" },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spdx": { "$ref": "#/$defs/text" },
+        "file": { "$ref": "#/$defs/resourcePath" }
+      },
+      "oneOf": [
+        { "required": ["spdx"], "not": { "required": ["file"] } },
+        { "required": ["file"], "not": { "required": ["spdx"] } }
+      ]
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runspace", "powerShell", "platforms"],
+      "properties": {
+        "runspace": { "$ref": "#/$defs/range" },
+        "powerShell": { "$ref": "#/$defs/range" },
+        "platforms": { "$ref": "#/$defs/platforms" }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modules", "providers"],
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version"],
+            "properties": {
+              "name": { "$ref": "#/$defs/moduleName" },
+              "version": { "$ref": "#/$defs/moduleRange" }
+            }
+          }
+        },
+        "providers": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/providerName" } }
+      }
+    },
+    "resources": { "type": "array", "items": { "$ref": "#/$defs/resource" } },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "queries": { "type": "array", "items": { "$ref": "#/$defs/query" } },
+    "views": { "type": "array", "items": { "$ref": "#/$defs/view" } },
+    "actionGroups": { "type": "array", "items": { "$ref": "#/$defs/actionGroup" } },
+    "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } }
+  },
+  "anyOf": [
+    { "properties": { "nodes": { "minItems": 1 } } },
+    { "properties": { "actions": { "minItems": 1 } } }
+  ],
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "definitionId": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*(?![\\s\\S])" },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?![\\s\\S])"
+    },
+    "stableVersion": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])" },
+    "moduleVersion": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:\\.(0|[1-9][0-9]*)){0,2}(?![\\s\\S])" },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minInclusive", "maxExclusive"],
+      "properties": {
+        "minInclusive": { "$ref": "#/$defs/stableVersion" },
+        "maxExclusive": { "$ref": "#/$defs/stableVersion" }
+      }
+    },
+    "moduleRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minInclusive", "maxExclusive"],
+      "properties": {
+        "minInclusive": { "$ref": "#/$defs/moduleVersion" },
+        "maxExclusive": { "$ref": "#/$defs/moduleVersion" }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["windows", "macos", "linux"] }
+    },
+    "moduleName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])" },
+    "providerName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])" },
+    "capability": {
+      "type": "string",
+      "pattern": "^(?:host\\.object-properties|provider:[A-Za-z0-9][A-Za-z0-9._-]*:(?:item|navigation|filter|include|exclude|expandWildcards|shouldProcess|credentials|transactions))(?![\\s\\S])"
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "platforms": { "$ref": "#/$defs/platforms" },
+        "capabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/capability" } }
+      }
+    },
+    "resourcePath": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9_-](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?/)*[A-Za-z0-9_-](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?(?![\\s\\S])"
+    },
+    "scriptPath": { "allOf": [{ "$ref": "#/$defs/resourcePath" }, { "pattern": "\\.ps1$" }] },
+    "iconPath": { "allOf": [{ "$ref": "#/$defs/resourcePath" }, { "pattern": "\\.png$" }] },
+    "documentPath": {
+      "allOf": [
+        { "$ref": "#/$defs/resourcePath" },
+        { "pattern": "(?:\\.(?:md|txt)$)|^(?:README|LICENSE|NOTICE)$" }
+      ]
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "owner", "license"],
+      "properties": {
+        "path": { "$ref": "#/$defs/resourcePath" },
+        "kind": { "enum": ["script", "icon", "documentation", "license"] },
+        "owner": { "$ref": "#/$defs/text" },
+        "license": { "$ref": "#/$defs/text" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "script" } } },
+          "then": { "properties": { "path": { "$ref": "#/$defs/scriptPath" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "icon" } } },
+          "then": { "properties": { "path": { "$ref": "#/$defs/iconPath" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["documentation", "license"] } } },
+          "then": { "properties": { "path": { "$ref": "#/$defs/documentPath" } } }
+        }
+      ]
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/definitionId" },
+        "name": { "$ref": "#/$defs/text" },
+        "description": { "$ref": "#/$defs/text" },
+        "kind": { "enum": ["folder", "query"] },
+        "parentId": { "$ref": "#/$defs/definitionId" },
+        "order": { "type": "integer" },
+        "icon": { "$ref": "#/$defs/iconPath" },
+        "queryId": { "$ref": "#/$defs/definitionId" },
+        "requirements": { "$ref": "#/$defs/requirements" }
+      },
+      "if": { "properties": { "kind": { "const": "query" } } },
+      "then": { "required": ["queryId"] },
+      "else": { "properties": { "queryId": false } }
+    },
+    "command": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\\\[A-Za-z][A-Za-z0-9]*-[A-Za-z][A-Za-z0-9]*(?![\\s\\S])" },
+    "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "type", "required"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])"
+        },
+        "label": { "$ref": "#/$defs/text" },
+        "type": { "enum": ["string", "boolean", "switch", "integer", "number", "dateTime", "guid", "stringArray", "secureString", "credential"] },
+        "required": { "type": "boolean" },
+        "default": true,
+        "choices": { "type": "array", "minItems": 1, "uniqueItems": true }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "string" } } },
+          "then": { "properties": { "default": { "type": "string" }, "choices": { "items": { "type": "string" } } } }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["boolean", "switch"] } } },
+          "then": { "properties": { "default": { "type": "boolean" }, "choices": { "items": { "type": "boolean" } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "integer" } } },
+          "then": { "properties": { "default": { "$ref": "#/$defs/int64" }, "choices": { "items": { "$ref": "#/$defs/int64" } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "number" } } },
+          "then": { "properties": { "default": { "type": "number" }, "choices": { "items": { "type": "number" } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "dateTime" } } },
+          "then": { "properties": { "default": { "$ref": "#/$defs/timestamp" }, "choices": { "items": { "$ref": "#/$defs/timestamp" } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "guid" } } },
+          "then": { "properties": { "default": { "$ref": "#/$defs/guid" }, "choices": { "items": { "$ref": "#/$defs/guid" } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "stringArray" } } },
+          "then": {
+            "properties": {
+              "default": { "type": "array", "items": { "type": "string" } },
+              "choices": { "items": { "type": "array", "items": { "type": "string" } } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["secureString", "credential"] } } },
+          "then": { "properties": { "default": false, "choices": false } }
+        }
+      ]
+    },
+    "int64": { "type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807 },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})(?![\\s\\S])"
+    },
+    "guid": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![\\s\\S])" },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "parameters", "viewId"],
+      "properties": {
+        "id": { "$ref": "#/$defs/definitionId" },
+        "kind": { "enum": ["command", "script"] },
+        "command": { "$ref": "#/$defs/command" },
+        "script": { "$ref": "#/$defs/scriptPath" },
+        "parameters": { "$ref": "#/$defs/parameters" },
+        "outputTypes": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+        "viewId": { "$ref": "#/$defs/definitionId" },
+        "requirements": { "$ref": "#/$defs/requirements" }
+      },
+      "if": { "properties": { "kind": { "const": "command" } } },
+      "then": { "required": ["command"], "properties": { "script": false } },
+      "else": { "required": ["script"], "properties": { "command": false } }
+    },
+    "propertyPath": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "property", "label", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/definitionId" },
+        "property": { "$ref": "#/$defs/propertyPath" },
+        "label": { "$ref": "#/$defs/text" },
+        "type": { "enum": ["string", "integer", "number", "boolean", "dateTime"] },
+        "format": { "const": "bytes" },
+        "width": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "if": { "properties": { "type": { "enum": ["string", "boolean", "dateTime"] } } },
+      "then": { "properties": { "format": false } }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "columns"],
+      "properties": {
+        "id": { "$ref": "#/$defs/definitionId" },
+        "columns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/column" } },
+        "defaultSort": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["columnId", "direction"],
+            "properties": {
+              "columnId": { "$ref": "#/$defs/definitionId" },
+              "direction": { "enum": ["ascending", "descending"] }
+            }
+          }
+        },
+        "identityProperties": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/propertyPath" } }
+      }
+    },
+    "actionGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/definitionId" },
+        "name": { "$ref": "#/$defs/text" },
+        "order": { "type": "integer" }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "types", "selection"],
+      "properties": {
+        "mode": { "enum": ["none", "pipeline", "host"] },
+        "types": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": {
+            "min": { "type": "integer", "minimum": 0 },
+            "max": { "type": "integer", "minimum": 0 }
+          }
+        }
+      },
+      "if": { "properties": { "mode": { "const": "none" } } },
+      "then": {
+        "properties": {
+          "types": { "maxItems": 0 },
+          "selection": { "properties": { "min": { "const": 0 }, "max": { "const": 0 } } }
+        }
+      },
+      "else": {
+        "properties": {
+          "types": { "minItems": 1 },
+          "selection": { "properties": { "max": { "minimum": 1 } } }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy"],
+      "properties": {
+        "policy": { "enum": ["retain", "refresh", "replace", "related"] },
+        "viewId": { "$ref": "#/$defs/definitionId" }
+      },
+      "if": { "properties": { "policy": { "enum": ["replace", "related"] } } },
+      "then": { "required": ["viewId"] },
+      "else": { "properties": { "viewId": false } }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "groupId", "kind", "parameters", "input", "mutates", "supportsShouldProcess", "result"],
+      "properties": {
+        "id": { "$ref": "#/$defs/definitionId" },
+        "name": { "$ref": "#/$defs/text" },
+        "description": { "$ref": "#/$defs/text" },
+        "groupId": { "$ref": "#/$defs/definitionId" },
+        "nodeIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/definitionId" } },
+        "kind": { "enum": ["command", "script", "host"] },
+        "command": { "$ref": "#/$defs/command" },
+        "script": { "$ref": "#/$defs/scriptPath" },
+        "handler": { "const": "object.properties" },
+        "parameters": { "$ref": "#/$defs/parameters" },
+        "input": { "$ref": "#/$defs/input" },
+        "mutates": { "type": "boolean" },
+        "confirmation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["message"],
+          "properties": { "message": { "$ref": "#/$defs/text" } }
+        },
+        "supportsShouldProcess": { "type": "boolean" },
+        "result": { "$ref": "#/$defs/result" },
+        "requirements": { "$ref": "#/$defs/requirements" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "command" } } },
+          "then": { "required": ["command"], "properties": { "script": false, "handler": false, "input": { "properties": { "mode": { "enum": ["none", "pipeline"] } } } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "script" } } },
+          "then": { "required": ["script"], "properties": { "command": false, "handler": false, "input": { "properties": { "mode": { "enum": ["none", "pipeline"] } } } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "host" } } },
+          "then": {
+            "required": ["handler"],
+            "properties": {
+              "command": false,
+              "script": false,
+              "parameters": { "maxItems": 0 },
+              "mutates": { "const": false },
+              "supportsShouldProcess": { "const": false },
+              "input": {
+                "properties": {
+                  "mode": { "const": "host" },
+                  "types": { "const": ["System.Object"] },
+                  "selection": { "properties": { "min": { "const": 1 }, "max": { "const": 1 } } }
+                }
+              },
+              "result": { "properties": { "policy": { "const": "retain" } } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "mutates": { "const": true } } },
+          "then": { "required": ["confirmation"] }
+        }
+      ]
+    }
+  }
+}

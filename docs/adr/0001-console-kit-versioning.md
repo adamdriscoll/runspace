@@ -1,0 +1,3 @@
+# Separate kit shape, release, and host-contract versions
+
+Accepted on 2026-10-07 for the [Console Kit v1 contract](../console-kits.md). A Console Kit uses an integer manifest schema revision, publisher-owned SemVer release identity, and explicit bounds on a separately versioned Runspace Kit Contract rather than desktop application release numbers; this lets the application evolve without falsely breaking compatible kits or silently changing their execution semantics. The cost is maintaining explicit supported schema/contract semantics and compatibility diagnostics in the future loader, which remains unimplemented; numeric ranges alone do not certify runtime/platform support.

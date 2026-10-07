@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "runspace.object-members",
+  "name": "Object members",
+  "version": "1.0.0",
+  "publisher": {
+    "name": "Runspace",
+    "url": "https://github.com/adamdriscoll/runspace"
+  },
+  "description": "Original action-only kit for read-only member discovery on selected objects.",
+  "license": { "spdx": "MIT" },
+  "compatibility": {
+    "runspace": { "minInclusive": "1.0.0", "maxExclusive": "2.0.0" },
+    "powerShell": { "minInclusive": "7.6.0", "maxExclusive": "8.0.0" },
+    "platforms": ["windows", "macos", "linux"]
+  },
+  "dependencies": {
+    "modules": [
+      {
+        "name": "Microsoft.PowerShell.Utility",
+        "version": { "minInclusive": "7.0.0", "maxExclusive": "8.0.0" }
+      }
+    ],
+    "providers": []
+  },
+  "resources": [
+    { "path": "README.md", "kind": "documentation", "owner": "Adam Driscoll", "license": "MIT" },
+    { "path": "LICENSE", "kind": "license", "owner": "Adam Driscoll", "license": "MIT" }
+  ],
+  "nodes": [],
+  "queries": [],
+  "views": [
+    {
+      "id": "members.table",
+      "columns": [
+        { "id": "name", "property": ["Name"], "label": "Name", "type": "string" },
+        { "id": "kind", "property": ["MemberType"], "label": "Member kind", "type": "string" },
+        { "id": "definition", "property": ["Definition"], "label": "Definition", "type": "string" }
+      ],
+      "defaultSort": [{ "columnId": "name", "direction": "ascending" }]
+    }
+  ],
+  "actionGroups": [{ "id": "inspect", "name": "Inspection", "order": 0 }],
+  "actions": [
+    {
+      "id": "members.inspect",
+      "name": "Inspect members",
+      "description": "Describe members of the frozen original selection without evaluating property values.",
+      "groupId": "inspect",
+      "kind": "command",
+      "command": "Microsoft.PowerShell.Utility\\Get-Member",
+      "parameters": [],
+      "input": { "mode": "pipeline", "types": ["System.Object"], "selection": { "min": 1, "max": 128 } },
+      "mutates": false,
+      "supportsShouldProcess": false,
+      "result": { "policy": "replace", "viewId": "members.table" }
+    }
+  ]
+}
