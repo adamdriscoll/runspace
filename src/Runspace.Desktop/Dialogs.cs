@@ -14,6 +14,44 @@ namespace Runspace.Desktop;
 
 internal static class Dialogs
 {
+    public static async Task<UnsavedScriptChoice> UnsavedScriptAsync(Window owner, string name)
+    {
+        var dialog = Create(owner, "Unsaved script", 500);
+        dialog.Name = "UnsavedScriptDialog";
+        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 14 };
+        panel.Children.Add(new TextBlock { Text = $"Save changes to {name} before continuing?", TextWrapping = TextWrapping.Wrap });
+        var buttons = Buttons();
+        foreach (var (caption, choice) in new[]
+        {
+            ("Cancel", UnsavedScriptChoice.Cancel), ("Discard", UnsavedScriptChoice.Discard), ("Save", UnsavedScriptChoice.Save)
+        })
+        {
+            var button = new Button { Name = "Script" + caption, Content = caption, IsCancel = choice == UnsavedScriptChoice.Cancel };
+            button.Click += (_, _) => dialog.Complete(choice);
+            buttons.Children.Add(button);
+        }
+        panel.Children.Add(buttons);
+        dialog.Content = panel;
+        return await ShowPromptAsync<UnsavedScriptChoice>(dialog, owner, CancellationToken.None);
+    }
+
+    public static async Task<bool> OverwriteScriptAsync(Window owner, string path)
+    {
+        var dialog = Create(owner, "Replace script file", 500);
+        var panel = new StackPanel { Margin = new Thickness(16), Spacing = 14 };
+        panel.Children.Add(new TextBlock { Text = $"Replace the existing file at {path}?", TextWrapping = TextWrapping.Wrap });
+        var buttons = Buttons();
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var save = new Button { Content = "Replace" };
+        cancel.Click += (_, _) => dialog.Complete(false);
+        save.Click += (_, _) => dialog.Complete(true);
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(save);
+        panel.Children.Add(buttons);
+        dialog.Content = panel;
+        return await ShowPromptAsync<bool>(dialog, owner, CancellationToken.None);
+    }
+
     public static async Task<bool> ConfirmAsync(Window owner, string title, string message, CancellationToken cancellationToken = default)
     {
         var dialog = Create(owner, title, 500);

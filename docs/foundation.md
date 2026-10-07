@@ -16,6 +16,16 @@ The required runtime is .NET 10, with Microsoft.PowerShell.SDK 7.6.6 and Avaloni
 
 The PowerShell module owns live objects; desktop bindings use cached cells rather than invoking arbitrary getters. Invocation and object-inspection work is serialized in the owning session. Provider paths are passed as literal parameters, not interpolated into executable code.
 
+### Editor-only integration
+
+The desktop pins published `PoshTools.Iseberg.Editor` **0.0.3** from nuget.org, with exact producer dependencies Avalonia **12.1.3** and AvaloniaEdit **12.0.0**. Debug, Release and desktop-test locked graphs include it. The published binary API/metadata was inspected rather than using an unpublished preview or copying producer source. Iseberg and AvaloniaEdit are MIT; editor license/distribution notices and the upstream AvaloniaEdit license accompany published output.
+
+`ScriptEditorWorkspace` owns one AvaloniaEdit document and its saved text/path/encoding/fingerprint. `ScriptFileStore` runs strict decoding and flushed atomic file writes off the dispatcher; UI state commits only after successful file operations. Unsaved choices and filesystem-conflict errors are explicit. The separate Current Script document follows `ConsoleViewModel.Script`; its control rejects user/automation edits. Permanent window close disposes both controls and removes document/model subscriptions, while ordinary tab detach/reattach preserves editing state.
+
+No analysis/completion providers, unrestricted PowerShell parser, engine, workbench or execution gestures are attached. DSC text is ordinary editable text. Adding the editor creates no new administration session and does not alter its modules/drives/variables or record user script text. Named tab references preserve Results/History/Current Script navigation. Focus-local find and file gestures are platform-aware; editor F5/F8 and Back/Forward gestures are isolated from administration commands. High contrast disables per-instance lexical palettes without changing application resources.
+
+Focused `ScriptEditor` desktop regressions cover file preservation/cancellation/failure/conflicts, rendered Fluent controls, undo/find, read-only automation, dirty close protection, session/runspace isolation and preserved administration state. The published native gate also renders both shipped controls with synthetic input and checks undo/find/contrast/F5/F8 isolation. These checks do not certify physical keyboards, screen readers, native Linux/macOS editing, or trim/AOT deployment. Execution/session/debugger acceptance in [#20](https://github.com/adamdriscoll/runspace/issues/20) remains future work; this integration only supplies editing.
+
 The [compact-shell acceptance record](shell-validation.md) retains this adapter decision, records original fixture renders at known client sizes/scales, and distinguishes automated keyboard/automation-peer checks from outstanding native DPI and screen-reader qualification.
 
 ## Actual PowerGUI reference run

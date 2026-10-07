@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:Runspace.Desktop.ViewModels"
+        xmlns:editor="clr-namespace:Iseberg.Editor;assembly=Iseberg.Editor"
         x:Class="Runspace.Desktop.MainWindow"
         Title="Runspace - Administration Console"
         Width="1200" Height="800" MinWidth="900" MinHeight="600"
@@ -8,6 +9,11 @@
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <Menu x:Name="MainMenu" Grid.Row="0" Background="{DynamicResource ConsoleChrome}">
       <MenuItem Header="_File">
+        <MenuItem x:Name="NewScriptMenu" Header="_New script" Click="NewScriptClick" />
+        <MenuItem x:Name="OpenScriptMenu" Header="_Open script..." Click="OpenScriptClick" />
+        <MenuItem x:Name="SaveScriptMenu" Header="_Save script" Click="SaveScriptClick" />
+        <MenuItem x:Name="SaveScriptAsMenu" Header="Save script _as..." Click="SaveScriptAsClick" />
+        <Separator />
         <MenuItem Header="Export table..." Click="ExportClick" />
         <Separator />
         <MenuItem Header="E_xit" Click="ExitClick" />
@@ -18,6 +24,8 @@
         <Separator />
         <MenuItem Header="Results" Click="ResultsClick" />
         <MenuItem Header="PowerShell _History" Click="HistoryClick" />
+        <MenuItem Header="Current Script" Click="CurrentScriptClick" />
+        <MenuItem Header="Script Editor" Click="ScriptEditorClick" />
         <MenuItem Header="_Diagnostics" Click="DiagnosticsClick" />
         <MenuItem x:Name="HighContrastMenu" Header="High _contrast" ToggleType="CheckBox" Click="HighContrastClick" />
         <Separator />
@@ -88,7 +96,7 @@
                     Background="{DynamicResource ConsoleBorder}" />
       <Grid Grid.Column="2" RowDefinitions="*,Auto">
         <TabControl x:Name="DocumentTabs" Grid.Row="0" Margin="0" Padding="0">
-          <TabItem Header="Results">
+          <TabItem x:Name="ResultsTab" Header="Results">
             <Grid RowDefinitions="Auto,Auto,*,Auto">
               <Border Grid.Row="0" MinHeight="28" Background="{DynamicResource ConsoleChrome}" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="0,0,0,1" Padding="7,1">
                 <Grid ColumnDefinitions="*,Auto">
@@ -115,14 +123,33 @@
               </Border>
             </Grid>
           </TabItem>
-          <TabItem Header="PowerShell History">
+          <TabItem x:Name="HistoryTab" Header="PowerShell History">
             <TextBox AutomationProperties.Name="PowerShell invocation history" Text="{Binding History}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
                      FontFamily="Cascadia Mono, Consolas, monospace" BorderThickness="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
           </TabItem>
-          <TabItem Header="Current Script">
-            <TextBox AutomationProperties.Name="Current PowerShell script" Text="{Binding Script}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                     FontFamily="Cascadia Mono, Consolas, monospace" BorderThickness="0" />
+          <TabItem x:Name="CurrentScriptTab" Header="Current Script">
+            <Grid RowDefinitions="Auto,*">
+              <TextBlock Margin="8,4" TextWrapping="Wrap" Text="Read-only administration script. Lexical highlighting only; semantic diagnostics and completion unavailable." />
+              <editor:PowerShellEditorControl x:Name="CurrentScriptEditor" Grid.Row="1"
+                     EditorName="Current PowerShell script (read-only)" IsReadOnly="True" EnableExecutionGestures="False" />
+            </Grid>
+          </TabItem>
+          <TabItem x:Name="ScriptEditorTab" Header="Script Editor">
+            <Grid x:Name="ScriptEditingPane" RowDefinitions="Auto,Auto,*,Auto">
+              <WrapPanel Orientation="Horizontal" Margin="4,2">
+                <Button x:Name="NewScriptButton" Content="_New" Click="NewScriptClick" />
+                <Button x:Name="OpenScriptButton" Content="_Open..." Click="OpenScriptClick" />
+                <Button x:Name="SaveScriptButton" Content="_Save" Click="SaveScriptClick" />
+                <Button x:Name="SaveScriptAsButton" Content="Save _As..." Click="SaveScriptAsClick" />
+                <Button x:Name="FindScriptButton" Content="_Find..." Click="FindScriptClick" />
+              </WrapPanel>
+              <TextBlock Grid.Row="1" Margin="8,4" TextWrapping="Wrap"
+                         Text="Editing only - no execution or debugging. Lexical highlighting is not validation; semantic diagnostics and completion unavailable." />
+              <editor:PowerShellEditorControl x:Name="ScriptEditor" Grid.Row="2"
+                     EditorName="Editable PowerShell script" EnableExecutionGestures="False" />
+              <TextBlock x:Name="ScriptEditorStatus" Grid.Row="3" Margin="8,4" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+            </Grid>
           </TabItem>
         </TabControl>
         <Border x:Name="DiagnosticsPane" Grid.Row="1" IsVisible="False" Height="160" BorderBrush="{DynamicResource ConsoleBorder}" BorderThickness="0,1,0,0">

@@ -54,12 +54,15 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null, true) { }
 
-    public MainWindow(IConsoleSession? session, bool persistLayout = false)
+    public MainWindow(IConsoleSession? session, bool persistLayout = false) : this(session, persistLayout, null) { }
+
+    internal MainWindow(IConsoleSession? session, bool persistLayout, IScriptEditorInteraction? editorInteraction)
     {
         _session = session;
         _persistLayout = persistLayout;
         InitializeComponent();
         DataContext = _model;
+        InitializeEditors(editorInteraction);
         BuildNavigation();
         NavigationTree.AddHandler(TreeViewItem.ExpandedEvent, Expanded);
         NavigationTree.AddHandler(TreeViewItem.CollapsedEvent, Collapsed);
@@ -294,7 +297,7 @@ public partial class MainWindow : Window
         LocationBox.IsVisible = node.Kind == ResourceKind.ProviderPath;
         GoButton.IsVisible = LocationBox.IsVisible;
         Breadcrumb.IsVisible = !LocationBox.IsVisible;
-        DocumentTabs.SelectedIndex = 0;
+        DocumentTabs.SelectedItem = ResultsTab;
         _appliedFilter = string.Empty;
         FilterBox.Text = string.Empty;
         if (addHistory)
@@ -855,9 +858,10 @@ public partial class MainWindow : Window
 
     private async void WindowKeyDown(object? sender, KeyEventArgs e)
     {
+        if (await HandleEditorKeyAsync(e)) return;
         if (e.Key == Key.F5) { e.Handled = true; await SafeAsync(RefreshAsync); }
         else if (e.Key == Key.F && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
-        { e.Handled = true; DocumentTabs.SelectedIndex = 0; FilterBox.Focus(); }
+        { e.Handled = true; DocumentTabs.SelectedItem = ResultsTab; FilterBox.Focus(); }
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && e.Key is Key.Left or Key.Right)
         { e.Handled = true; await SafeAsync(() => MoveHistoryAsync(e.Key == Key.Left ? -1 : 1)); }
     }
@@ -947,8 +951,20 @@ public partial class MainWindow : Window
     {
         if (_readyToClose) return;
         e.Cancel = true;
-        if (_closing) return;
+        if (_closing || _confirmingEditorClose) return;
+        _confirmingEditorClose = true;
+        try
+        {
+            if (_editorOperation is not null) await _editorOperation;
+            if (!await _scriptWorkspace.CanCloseAsync()) return;
+        }
+        finally
+        {
+            _confirmingEditorClose = false;
+            EditorWorkspaceChanged(this, EventArgs.Empty);
+        }
         _closing = true;
+        DisposeEditors();
         _lifetime.Cancel();
         _active?.Cancel();
         await SafeAsync(() => { SaveLayout(); return Task.CompletedTask; });
@@ -995,12 +1011,16 @@ public partial class MainWindow : Window
         else _model.Status = "Select one object to inspect its properties.";
     });
     private async void ExportClick(object? sender, RoutedEventArgs e) => await SafeAsync(ExportAsync);
-    private void ResultsClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedIndex = 0;
-    private void HistoryClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedIndex = 1;
+    private void ResultsClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedItem = ResultsTab;
+    private void HistoryClick(object? sender, RoutedEventArgs e) => DocumentTabs.SelectedItem = HistoryTab;
+    private void CurrentScriptClick(object? sender, RoutedEventArgs e) { DocumentTabs.SelectedItem = CurrentScriptTab; CurrentScriptEditor.FocusEditor(); }
     private void DiagnosticsClick(object? sender, RoutedEventArgs e) => DiagnosticsPane.IsVisible = !DiagnosticsPane.IsVisible;
     private void HideDiagnosticsClick(object? sender, RoutedEventArgs e) => DiagnosticsPane.IsVisible = false;
-    private void HighContrastClick(object? sender, RoutedEventArgs e) =>
+    private void HighContrastClick(object? sender, RoutedEventArgs e)
+    {
         RequestedThemeVariant = HighContrastMenu.IsChecked ? App.HighContrastTheme : ThemeVariant.Light;
+        UpdateEditorContrast();
+    }
     private void ExitClick(object? sender, RoutedEventArgs e) => Close();
     private void ResetLayoutClick(object? sender, RoutedEventArgs e)
     {

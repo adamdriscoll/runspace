@@ -95,9 +95,9 @@ The tree loads at most 200 children per location and 1,000 nodes overall. Omitte
 
 | Shortcut | Operation |
 | --- | --- |
-| F5 | Refresh the active resource |
-| Alt+Left / Alt+Right | Navigate back/forward |
-| Ctrl/Command+F | Focus the result filter |
+| F5 | Refresh the active resource outside editor focus |
+| Alt+Left / Alt+Right | Navigate back/forward outside the editor |
+| Ctrl/Command+F | Find in a focused script editor; otherwise focus the result filter |
 | Ctrl/Command+A | Select all visible result rows |
 | Ctrl/Command+C | Copy selected rows |
 | Enter | Inspect properties or follow the row's related view |
@@ -137,6 +137,20 @@ Diagnostics keeps the latest 2,000 ordinary records, a separate latest-1,000 err
 **Export table...** saves only retained, filtered visible rows; clear the filter to export every retained row before leaving the view. Copy diagnostic/history text into a file before eviction or close. Recover complete read-only output by deliberately querying a narrower scope or using a separate PowerShell with file-directed export/logging; do not automatically replay mutations, redacted history or interactive input. See [measured responsiveness and the full retention policy](result-performance.md).
 
 Interactive host input is not recorded and its history is labeled **Non-replayable**. Credentials and secure values are disposed after execution, and password editors are cleared when their prompt closes. Because scripts can echo or embed secrets in arbitrary objects, an invocation using credential/secure host input does not retain returned objects and redacts all textual diagnostics and its command representation. This conservative policy is visible in Diagnostics; it is not a security sandbox or a guarantee that arbitrary PowerShell scripts cannot keep or disclose their own copies.
+
+## Script editing only
+
+**View -> Script Editor** opens one editable document using published `PoshTools.Iseberg.Editor` **0.0.3**. Use its toolbar or **File -> New/Open/Save/Save As**. Ctrl+N/O/S and Ctrl+Shift+S (Command on macOS) select the editor and operate on that document. Ctrl/Command+F opens Find when a script editor has focus; normal selection, undo/redo and clipboard editing remain available. The editor shows its full file path, an unsaved-change marker, and file-operation status.
+
+New, Open and application close protect unsaved changes with **Save / Discard / Cancel**. Cancelling a save picker or a failed save aborts that operation. File failures show a script-specific dialog without changing the document/path/dirty state or the console's result/history/diagnostic state. File operations temporarily lock the editing area, not the administration session. Files are opened as text only; nothing is executed.
+
+Opened UTF-8 (with or without BOM), UTF-16 and UTF-32 BOM-marked files retain their encoding and existing line endings. New documents save as UTF-8 without BOM. Invalid UTF-8 without a supported BOM is rejected rather than silently replacing characters. Save uses a flushed, same-directory temporary file and atomic replacement; changes on disk are detected and require reopening or Save As. Save As asks before replacing an existing file. A competing filesystem rename during the final swap preserves the displaced version in a named `.save-backup` file and reports its location instead of silently losing it. This is conflict detection/recovery, not a cross-process filesystem transaction. Unix permission bits are preserved on replacement; new Unix files start owner-only. Symbolic-link/reparse-point files may be read but require Save As to a regular file. Local filesystem paths are required; cloud-only storage-provider URIs are unsupported.
+
+**Current Script** is a separate, read-only highlighted representation of the latest administration invocation. It updates as the console runs queries/actions and never replaces the editable document. Both editors use lexical highlighting only: **semantic diagnostics and completion are unavailable**, not "zero syntax errors." High contrast disables both lexical palettes and uses the console's text/background/gutter colors.
+
+There are no Run controls, debugger, script session or run history. Editor F5/F8/Ctrl+Pause do not execute scripts or refresh the console; focused editor navigation does not invoke administration Back/Forward. Deliberate administration toolbar/menu actions remain available. Switching tabs retains the existing administration result objects, selection, history and session. User-edited scripts are kept in memory and never included in layout/workspace persistence, invocation history or logs; only deliberate script saves write them to disk.
+
+The package and AvaloniaEdit are MIT-licensed. Published output includes their license/distribution notices in `ThirdPartyNotices`; the existing Avalonia/native and embedded-PowerShell requirements still apply. The editor adds no PowerShell runtime dependency or parser/provider fallback. Physical keyboard and screen-reader behavior and native editor interaction on Linux/macOS remain unverified; the editor's Edit/Value automation peer is not a full TextPattern implementation. Trimming/Native AOT are not validated.
 
 ## Saved settings
 
