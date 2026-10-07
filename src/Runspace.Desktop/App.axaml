@@ -5,6 +5,7 @@
              RequestedThemeVariant="Light">
   <Application.Resources>
     <ResourceDictionary>
+      <WindowIcon x:Key="RunspaceIcon">avares://Runspace.Desktop/Assets/runspace.ico</WindowIcon>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="ConsoleChrome">#F0F0F0</SolidColorBrush>
@@ -42,6 +43,7 @@
     <FluentTheme DensityStyle="Compact" />
     <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
     <Style Selector="Window">
+      <Setter Property="Icon" Value="{StaticResource RunspaceIcon}" />
       <Setter Property="FontSize" Value="12" />
       <Setter Property="FontFamily" Value="Segoe UI, Arial, sans-serif" />
       <Setter Property="Background" Value="{DynamicResource ConsoleChrome}" />
