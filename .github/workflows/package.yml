@@ -1,0 +1,56 @@
+name: Package
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package / ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: runspace-${{ matrix.rid }}
+          path: artifacts/payload
+      - name: Build unsigned packages
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+          PACKAGE_RUNTIME: ${{ matrix.rid }}
+        run: ./packaging/Package.ps1 -Runtime $env:PACKAGE_RUNTIME -Version $env:PACKAGE_VERSION -Payload ./artifacts/payload
+      - name: Check archive and installer payloads
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+          PACKAGE_RUNTIME: ${{ matrix.rid }}
+        run: ./packaging/Test-Package.ps1 -Runtime $env:PACKAGE_RUNTIME -Version $env:PACKAGE_VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Runspace-${{ inputs.version }}-${{ matrix.rid }}
+          path: |
+            artifacts/packages/${{ matrix.rid }}/${{ inputs.version }}/*.zip
+            artifacts/packages/${{ matrix.rid }}/${{ inputs.version }}/*.msi
+            artifacts/packages/${{ matrix.rid }}/${{ inputs.version }}/*.dmg
+          if-no-files-found: error
