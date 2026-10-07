@@ -1,0 +1,75 @@
+name: Release packages
+
+on:
+  push:
+    tags: ['v*', '[0-9]*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Validate release tag
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG -creplace '^v', ''
+          if ($version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+            throw 'Release tags must be versions such as v1.2.3 or v1.2.3-preview.1.'
+          }
+          $parts = ($version -split '-')[0].Split('.')
+          if ([decimal]$parts[0] -gt 255 -or [decimal]$parts[1] -gt 255 -or [decimal]$parts[2] -gt 65535) {
+            throw 'Release versions must fit MSI limits: major/minor <= 255 and patch <= 65535.'
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$env:RELEASE_TAG" >> $env:GITHUB_OUTPUT
+  build:
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+  package:
+    needs: [version, build]
+    uses: ./.github/workflows/package.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+  upload:
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Runspace-${{ needs.version.outputs.version }}-*
+          path: artifacts
+          merge-multiple: true
+      - name: Attach packages to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" > releases.json
+          if ! jq -e --arg tag "$RELEASE_TAG" 'any(.[][]; .tag_name == $tag)' releases.json > /dev/null; then
+            args=()
+            if [[ "$RELEASE_VERSION" == *-* ]]; then args+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --verify-tag --title "Runspace $RELEASE_VERSION" --generate-notes "${args[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" artifacts/* --clobber

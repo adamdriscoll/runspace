@@ -17,6 +17,10 @@ Operations run with your current account's permissions. Missing capabilities and
 
 ## Quick start
 
+Download a self-contained package from [GitHub Releases](https://github.com/adamdriscoll/runspace/releases): ZIPs for Windows x64, Linux x64, and macOS ARM64, plus a Windows MSI and macOS DMG. Packages are currently unsigned; see the [installation and launch instructions](docs/usage.md#launching-runspace) for platform requirements and OS security prompts.
+
+To run from source:
+
 Install the **.NET 10 SDK** matching `global.json` (10.0.401, with patch roll-forward). A separate PowerShell installation is not required for the embedded engine.
 
 From the repository root in PowerShell:

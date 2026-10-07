@@ -4,6 +4,24 @@ Runspace presents a resource tree on the left, typed object tables in the center
 
 ## Launching Runspace
 
+### Release packages
+
+Download the package matching your platform from [GitHub Releases](https://github.com/adamdriscoll/runspace/releases). All packages include the .NET runtime and embedded PowerShell; neither needs to be installed separately. Extract the complete ZIP, not just its executable.
+
+| Platform | Release assets | Install and launch |
+| --- | --- | --- |
+| Windows x64 | `Runspace-<version>-win-x64.zip` and `.msi` | Extract the ZIP and run `Runspace.Desktop.exe`, or run the MSI (requires administrator permission) and launch **Runspace** from the Start menu. The MSI installs in Program Files and can be removed through Windows Installed apps. |
+| Ubuntu 24.04 x64 | `Runspace-<version>-linux-x64.zip` | Install the [native prerequisites](#linux-prerequisites), extract with `unzip`, and launch `./Runspace.Desktop` in a graphical session. |
+| macOS 15 ARM64 | `Runspace-<version>-osx-arm64.zip` and `.dmg` | Open the DMG and drag **Runspace.app** to **Applications**, or extract the ZIP and move the app there. Launch **Runspace** from Applications. |
+
+Packages are **unsigned**, and the macOS app is not notarized. Windows may show an unknown-publisher/SmartScreen warning. macOS Gatekeeper may block the downloaded app; after verifying its source, use **System Settings -> Privacy & Security -> Open Anyway** if macOS offers that option. Do not disable OS security globally. Managed-device policy may prevent launching unsigned applications.
+
+Release packaging preserves Unix executable permissions. If another extraction tool removes them, run `chmod +x ./Runspace.Desktop` on Linux, or `chmod +x /Applications/Runspace.app/Contents/MacOS/Runspace.Desktop` on macOS. Command-line macOS launch uses `open /Applications/Runspace.app`.
+
+The [support matrix](#supported-platform-matrix) still applies; packaging does not broaden the verified OS/architecture scope.
+
+### Source and CI outputs
+
 To run from source, install the .NET 10 SDK matching `global.json` and follow the [README quick start](../README.md#quick-start). The PowerShell engine is embedded; a separate PowerShell installation is not required.
 
 On macOS/Linux, use this project path after restoring and building the solution:

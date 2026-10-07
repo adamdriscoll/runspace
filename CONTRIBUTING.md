@@ -75,6 +75,23 @@ pwsh -NoProfile -File .\scripts\Validate-Publish.ps1 -Payload .\artifacts\publis
 
 See [published-build validation](docs/publish-validation.md) for exact probes, results, the clean Linux recipe, and hosted-runner limitations. A build/test success does not replace this gate, and passing a hosted-runner gate does not certify every pristine OS installation or GPU/display configuration. These outputs are not installers.
 
+### Release packaging
+
+The [Release packages workflow](.github/workflows/release.yml) runs when a version tag such as `v1.2.3`, `1.2.3`, or `v1.2.3-preview.1` is pushed, and when a GitHub release is published. It reuses the three-platform build/test and published-payload gates, then packages those exact versioned payloads. ZIPs for `win-x64`, `linux-x64`, and `osx-arm64`, a Windows MSI, and a macOS DMG are attached to the matching release. A tag push creates the release with generated notes if necessary; versions containing `-` are marked as prereleases. Reruns replace matching assets.
+
+Packages are unsigned, with no macOS notarization or NuGet publishing. Windows installs per-machine under Program Files with a Start menu shortcut and MSI upgrade/uninstall support. macOS packages contain `Runspace.app`; the DMG includes an Applications shortcut. Numeric versions must fit MSI limits (major/minor <= 255, patch <= 65535). Prerelease suffixes are retained in asset names and application versions; MSI upgrade ordering uses only the numeric version, so stable/prerelease packages with the same numeric version replace each other.
+
+Build packages locally on the target OS with PowerShell 7 and the .NET SDK:
+
+```powershell
+pwsh -NoProfile -File .\packaging\Package.ps1 -Runtime win-x64 -Version 1.2.3
+pwsh -NoProfile -File .\packaging\Test-Package.ps1 -Runtime win-x64 -Version 1.2.3
+```
+
+Use `linux-x64` or `osx-arm64` and the corresponding path syntax on those hosts. Linux/macOS require `zip` and `unzip`; macOS also uses the built-in `plutil` and `hdiutil`. Windows restores the pinned WiX tool from `.config/dotnet-tools.json`. Packaging writes under `artifacts/publish`, `artifacts/staging`, and `artifacts/packages`, partitioned by RID/version; remove those specific output directories before repeating the same build. Supply `-Payload <published-directory>` to package an existing self-contained Release payload rather than publishing again, as CI does; its runtime and embedded application version must match the requested package.
+
+`Test-Package.ps1` extracts the ZIP and administratively extracts the MSI (without installing it), or mounts the DMG read-only. It compares every packaged payload file against the publish directory and checks Unix executable permissions. WiX MSI validation, plist linting, and DMG integrity checks also run during packaging. Local packaging alone does not replace the published-payload gate.
+
 ## Submit a pull request
 
 Keep changes focused and link the issue they address. Explain the behavior change, how it was checked, and any platform or compatibility limitations. Update directly affected documentation, and distinguish implemented behavior from proposals.
